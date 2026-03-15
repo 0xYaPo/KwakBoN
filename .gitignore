@@ -36,5 +36,4 @@ node_modules/
 *.test
 *.out
 vendor/
-!wallets/*.pem
 seed.txt
