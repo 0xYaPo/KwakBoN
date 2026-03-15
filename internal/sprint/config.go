@@ -32,6 +32,11 @@ type Config struct {
 	Workers       int
 	ConfirmWorkers int
 	Duration       time.Duration
+	MaxInflightPerWallet         int
+	SuccessCooldown              time.Duration
+	TransientCooldown            time.Duration
+	QuarantineCooldown           time.Duration
+	QuarantineTransientThreshold int
 
 	Value    string
 	GasLimit uint64
@@ -95,6 +100,14 @@ func mustDurationSeconds(key string, defSeconds int) (time.Duration, error) {
 		return 0, err
 	}
 	return time.Duration(n) * time.Second, nil
+}
+
+func mustDurationMillis(key string, defMillis int) (time.Duration, error) {
+	n, err := mustInt(key, defMillis)
+	if err != nil {
+		return 0, err
+	}
+	return time.Duration(n) * time.Millisecond, nil
 }
 
 func splitCSV(in string) []string {
@@ -176,6 +189,32 @@ func LoadConfigFromEnv() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	maxInflight, err := mustInt("SPRINT_MAX_INFLIGHT_PER_WALLET", 2)
+	if err != nil {
+		return Config{}, err
+	}
+	if maxInflight <= 0 {
+		return Config{}, fmt.Errorf("SPRINT_MAX_INFLIGHT_PER_WALLET must be > 0")
+	}
+	successCooldown, err := mustDurationMillis("SPRINT_SUCCESS_COOLDOWN_MS", 50)
+	if err != nil {
+		return Config{}, err
+	}
+	transientCooldown, err := mustDurationMillis("SPRINT_TRANSIENT_COOLDOWN_MS", 1500)
+	if err != nil {
+		return Config{}, err
+	}
+	quarantineCooldown, err := mustDurationMillis("SPRINT_QUARANTINE_COOLDOWN_MS", 10000)
+	if err != nil {
+		return Config{}, err
+	}
+	quarantineThreshold, err := mustInt("SPRINT_QUARANTINE_TRANSIENT_THRESHOLD", 3)
+	if err != nil {
+		return Config{}, err
+	}
+	if quarantineThreshold <= 0 {
+		return Config{}, fmt.Errorf("SPRINT_QUARANTINE_TRANSIENT_THRESHOLD must be > 0")
+	}
 	poll, err := mustDurationSeconds("POLL_INTERVAL_SECONDS", 3)
 	if err != nil {
 		return Config{}, err
@@ -221,6 +260,11 @@ func LoadConfigFromEnv() (Config, error) {
 		Workers:                workers,
 		ConfirmWorkers:         confirmWorkers,
 		Duration:               duration,
+		MaxInflightPerWallet:   maxInflight,
+		SuccessCooldown:        successCooldown,
+		TransientCooldown:      transientCooldown,
+		QuarantineCooldown:     quarantineCooldown,
+		QuarantineTransientThreshold: quarantineThreshold,
 		Value:                  getenv("SPRINT_TX_VALUE", "1"),
 		GasLimit:               gasLimit,
 		GasPrice:               gasPrice,

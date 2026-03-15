@@ -216,7 +216,8 @@ func IsTransientSendError(err error) bool {
 		strings.Contains(msg, "service unavailable") ||
 		strings.Contains(msg, "gateway timeout") ||
 		strings.Contains(msg, "sending request error") ||
-		strings.Contains(msg, "lowerNonceInTx")
+		strings.Contains(msg, "lowernonceintx") ||
+		strings.Contains(msg, "veryhighnonceintx")
 }
 
 func sleepWithContext(ctx context.Context, d time.Duration) error {

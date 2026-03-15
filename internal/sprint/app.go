@@ -24,6 +24,11 @@ type Options struct {
 type senderWallet struct {
 	*wallets.Wallet
 	Shard int
+
+	stateMu         sync.Mutex
+	inflight        int
+	nextEligibleAt  time.Time
+	transientErrors int
 }
 
 type App struct {
@@ -146,7 +151,7 @@ func (a *App) Run(ctx context.Context) error {
 	}
 
 	log.Printf(
-		"[sprint] network=%s chainID=%s gateway=%s senders=%d receivers=%d targetTx=%d duration=%s tps=%d workers=%d confirmWorkers=%d value=%s gasLimit=%d gasPrice=%d waitConfirm=%t continueOnTransient=%t confirmTarget=%d confirmTimeout=%s shardFilter=%d",
+		"[sprint] network=%s chainID=%s gateway=%s senders=%d receivers=%d targetTx=%d duration=%s tps=%d workers=%d confirmWorkers=%d value=%s gasLimit=%d gasPrice=%d waitConfirm=%t continueOnTransient=%t confirmTarget=%d confirmTimeout=%s shardFilter=%d maxInflightPerWallet=%d successCooldown=%s transientCooldown=%s quarantineCooldown=%s quarantineThreshold=%d",
 		a.cfg.Network,
 		a.cfg.ChainID,
 		a.cfg.GatewayURL,
@@ -165,6 +170,11 @@ func (a *App) Run(ctx context.Context) error {
 		a.cfg.ConfirmSuccessTarget,
 		a.cfg.ConfirmTimeout,
 		a.cfg.ShardFilter,
+		a.cfg.MaxInflightPerWallet,
+		a.cfg.SuccessCooldown,
+		a.cfg.TransientCooldown,
+		a.cfg.QuarantineCooldown,
+		a.cfg.QuarantineTransientThreshold,
 	)
 
 	if a.opt.DryRun {
@@ -226,8 +236,13 @@ func (a *App) Run(ctx context.Context) error {
 					return
 				}
 
-				si := int(atomic.AddUint64(&rrSender, 1)-1) % len(a.senders)
-				sender := a.senders[si]
+				sender, ok := a.acquireSender(int(atomic.AddUint64(&rrSender, 1) - 1))
+				if !ok {
+					if sleepErr := sleepWithContext(runCtx, 10*time.Millisecond); sleepErr != nil {
+						return
+					}
+					continue
+				}
 				ri := int(atomic.AddUint64(&rrRecv, 1)-1) % len(a.receivers)
 				receiver := a.receivers[ri]
 
@@ -239,18 +254,28 @@ func (a *App) Run(ctx context.Context) error {
 					var err error
 					hash, err = a.sendOne(runCtx, sender, receiver)
 					if err == nil {
+						sender.markSuccess(a.cfg.SuccessCooldown)
 						break
 					}
 					if a.cfg.ContinueOnTransientSendError && gateway.IsTransientSendError(err) {
+						quarantined := sender.markTransient(
+							a.cfg.TransientCooldown,
+							a.cfg.QuarantineCooldown,
+							a.cfg.QuarantineTransientThreshold,
+						)
 						cur := atomic.AddUint64(&transientSendErrors, 1)
 						if cur <= 20 || cur%100 == 0 {
 							log.Printf("[sprint transient-send-error] count=%d err=%v", cur, err)
 						}
-						if strings.Contains(err.Error(), "lowerNonceInTx") {
-							time.Sleep(500 * time.Millisecond)
+						if quarantined {
+							log.Printf("[sprint wallet-quarantine] sender=%s cooldown=%s", sender.Address, a.cfg.QuarantineCooldown)
+						}
+						if sleepErr := sleepWithContext(runCtx, 100*time.Millisecond); sleepErr != nil {
+							return
 						}
 						continue
 					}
+					sender.release()
 					pushErr(err)
 					return
 				}
@@ -293,7 +318,7 @@ func (a *App) Run(ctx context.Context) error {
 	return nil
 }
 
-func (a *App) sendOne(ctx context.Context, sender senderWallet, receiver string) (string, error) {
+func (a *App) sendOne(ctx context.Context, sender *senderWallet, receiver string) (string, error) {
 	nonce := sender.ReserveNonce()
 	tx := gateway.TxSendRequest{
 		Nonce:    nonce,
@@ -341,26 +366,8 @@ func (a *App) sendOne(ctx context.Context, sender senderWallet, receiver string)
 	if nErr != nil {
 		return "", fmt.Errorf("send tx nonce=%d failed with lowerNonceInTx and nonce refresh failed: %w", nonce, nErr)
 	}
-	sender.SetNonce(networkNonce)
-	retryNonce := sender.ReserveNonce()
-	tx.Nonce = retryNonce
-	unsigned.Nonce = int64(retryNonce)
-
-	toSign, err = txsign.SerializeForSigning(unsigned)
-	if err != nil {
-		return "", fmt.Errorf("serialize retried tx nonce=%d: %w", retryNonce, err)
-	}
-	sig, err = sender.Signer.SignTxBytes(toSign)
-	if err != nil {
-		return "", fmt.Errorf("sign retried tx nonce=%d: %w", retryNonce, err)
-	}
-	tx.Signature = hex.EncodeToString(sig)
-
-	hash, err = a.gw.SendTx(ctx, tx)
-	if err != nil {
-		return "", fmt.Errorf("send retried tx nonce=%d: %w", retryNonce, err)
-	}
-	return hash, nil
+	sender.SetNonceAtLeast(networkNonce)
+	return "", fmt.Errorf("send tx nonce=%d hit lowerNonceInTx; refreshed network nonce=%d: %w", nonce, networkNonce, err)
 }
 
 func (a *App) waitForFinalStatuses(ctx context.Context, hashes []string) (int, int, error) {
@@ -474,4 +481,76 @@ func max(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func sleepWithContext(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
+}
+
+func (a *App) acquireSender(start int) (*senderWallet, bool) {
+	now := time.Now()
+	for i := 0; i < len(a.senders); i++ {
+		idx := (start + i) % len(a.senders)
+		if a.senders[idx].tryAcquire(now, a.cfg.MaxInflightPerWallet) {
+			return &a.senders[idx], true
+		}
+	}
+	return nil, false
+}
+
+func (w *senderWallet) tryAcquire(now time.Time, maxInflight int) bool {
+	w.stateMu.Lock()
+	defer w.stateMu.Unlock()
+	if w.inflight >= maxInflight {
+		return false
+	}
+	if now.Before(w.nextEligibleAt) {
+		return false
+	}
+	w.inflight++
+	return true
+}
+
+func (w *senderWallet) markSuccess(cooldown time.Duration) {
+	w.stateMu.Lock()
+	defer w.stateMu.Unlock()
+	if w.inflight > 0 {
+		w.inflight--
+	}
+	w.transientErrors = 0
+	w.nextEligibleAt = time.Now().Add(cooldown)
+}
+
+func (w *senderWallet) markTransient(cooldown time.Duration, quarantine time.Duration, threshold int) bool {
+	w.stateMu.Lock()
+	defer w.stateMu.Unlock()
+	if w.inflight > 0 {
+		w.inflight--
+	}
+	w.transientErrors++
+	nextCooldown := cooldown
+	quarantined := false
+	if w.transientErrors >= threshold {
+		nextCooldown = quarantine
+		w.transientErrors = 0
+		quarantined = true
+	}
+	w.nextEligibleAt = time.Now().Add(nextCooldown)
+	return quarantined
+}
+
+func (w *senderWallet) release() {
+	w.stateMu.Lock()
+	defer w.stateMu.Unlock()
+	if w.inflight > 0 {
+		w.inflight--
+	}
 }
