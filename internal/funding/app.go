@@ -118,14 +118,46 @@ func (a *App) Run(ctx context.Context) error {
 	nonce := treasuryNonce
 	hashes := make([]string, 0, len(targets))
 	for i, target := range targets {
+		if i > 0 && i%a.cfg.NonceRefreshEvery == 0 {
+			networkNonce, err := a.gw.GetAccountNonce(ctx, a.cfg.TreasuryAddress)
+			if err != nil {
+				return fmt.Errorf("refresh treasury nonce after %d sends: %w", i, err)
+			}
+			if networkNonce > nonce {
+				log.Printf("[fundwallets] treasury nonce refresh old=%d new=%d after=%d", nonce, networkNonce, i)
+				nonce = networkNonce
+			}
+		}
+
 		hash, err := a.sendTopUp(ctx, nonce, target)
 		if err != nil {
-			return fmt.Errorf("fund %s: %w", target.Address, err)
+			if a.shouldRefreshNonce(err) {
+				networkNonce, nErr := a.gw.GetAccountNonce(ctx, a.cfg.TreasuryAddress)
+				if nErr != nil {
+					return fmt.Errorf("fund %s failed with nonce issue and treasury nonce refresh failed: %w", target.Address, nErr)
+				}
+				log.Printf("[fundwallets] treasury nonce resync old=%d new=%d target=%s", nonce, networkNonce, target.Address)
+				nonce = networkNonce
+				if sleepErr := sleepWithContext(ctx, a.cfg.NonceRetryCooldown); sleepErr != nil {
+					return sleepErr
+				}
+				hash, err = a.sendTopUp(ctx, nonce, target)
+				if err != nil {
+					return fmt.Errorf("fund %s after nonce resync: %w", target.Address, err)
+				}
+			} else {
+				return fmt.Errorf("fund %s: %w", target.Address, err)
+			}
 		}
 		nonce++
 		hashes = append(hashes, hash)
 		if (i+1)%25 == 0 || i+1 == len(targets) {
 			log.Printf("[fundwallets] sent=%d/%d", i+1, len(targets))
+		}
+		if a.cfg.SendCooldown > 0 {
+			if sleepErr := sleepWithContext(ctx, a.cfg.SendCooldown); sleepErr != nil {
+				return sleepErr
+			}
 		}
 	}
 
@@ -316,4 +348,24 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func (a *App) shouldRefreshNonce(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "lowernonceintx") || strings.Contains(msg, "veryhighnonceintx")
+}
+
+func sleepWithContext(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
 }

@@ -27,6 +27,9 @@ type Config struct {
 	ShardFilter     int
 
 	TargetAmountByStatus map[string]string
+	NonceRefreshEvery    int
+	SendCooldown         time.Duration
+	NonceRetryCooldown   time.Duration
 }
 
 func getenv(key, def string) string {
@@ -81,6 +84,14 @@ func mustDurationSeconds(key string, defSeconds int) (time.Duration, error) {
 	return time.Duration(n) * time.Second, nil
 }
 
+func mustDurationMillis(key string, defMillis int) (time.Duration, error) {
+	n, err := mustInt(key, defMillis)
+	if err != nil {
+		return 0, err
+	}
+	return time.Duration(n) * time.Millisecond, nil
+}
+
 func splitCSV(in string) []string {
 	if strings.TrimSpace(in) == "" {
 		return nil
@@ -125,6 +136,21 @@ func LoadConfigFromEnv() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	nonceRefreshEvery, err := mustInt("FUND_NONCE_REFRESH_EVERY", 75)
+	if err != nil {
+		return Config{}, err
+	}
+	if nonceRefreshEvery <= 0 {
+		return Config{}, fmt.Errorf("FUND_NONCE_REFRESH_EVERY must be > 0")
+	}
+	sendCooldown, err := mustDurationMillis("FUND_SEND_COOLDOWN_MS", 25)
+	if err != nil {
+		return Config{}, err
+	}
+	nonceRetryCooldown, err := mustDurationMillis("FUND_NONCE_RETRY_COOLDOWN_MS", 750)
+	if err != nil {
+		return Config{}, err
+	}
 
 	targets := map[string]string{
 		"active_candidate": getenv("FUND_TARGET_ACTIVE_EGLD", "0.6"),
@@ -149,6 +175,9 @@ func LoadConfigFromEnv() (Config, error) {
 		RequiredTags:    splitCSV(getenv("FUND_REQUIRED_TAGS", "window_a")),
 		ShardFilter:     shardFilter,
 		TargetAmountByStatus: targets,
+		NonceRefreshEvery:    nonceRefreshEvery,
+		SendCooldown:         sendCooldown,
+		NonceRetryCooldown:   nonceRetryCooldown,
 	}
 
 	if cfg.TreasuryAddress == "" || cfg.TreasuryPemPath == "" {
