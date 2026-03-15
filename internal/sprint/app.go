@@ -31,12 +31,17 @@ type senderWallet struct {
 	transientErrors int
 }
 
+type receiverTarget struct {
+	Address string
+	Shard   int
+}
+
 type App struct {
 	cfg       Config
 	opt       Options
 	gw        *gateway.Client
 	senders   []senderWallet
-	receivers []string
+	receivers []receiverTarget
 }
 
 func New(cfg Config, opt Options) (*App, error) {
@@ -50,12 +55,16 @@ func New(cfg Config, opt Options) (*App, error) {
 	}
 
 	senders := make([]senderWallet, 0)
-	receivers := make([]string, 0)
+	receivers := make([]receiverTarget, 0)
 
 	if len(cfg.ReceiverAddresses) > 0 {
 		for _, address := range cfg.ReceiverAddresses {
+			shard, ok := findWalletShard(mf, address)
+			if !ok {
+				return nil, fmt.Errorf("receiver %s not found in manifest", address)
+			}
 			for i := 0; i < max(1, cfg.ReceiverWeight); i++ {
-				receivers = append(receivers, address)
+				receivers = append(receivers, receiverTarget{Address: address, Shard: shard})
 			}
 		}
 		if cfg.IncludeTreasuryReceiver {
@@ -65,7 +74,7 @@ func New(cfg Config, opt Options) (*App, error) {
 				}
 				if strings.EqualFold(record.Status, "treasury") {
 					for i := 0; i < max(1, cfg.TreasuryReceiverWeight); i++ {
-						receivers = append(receivers, record.Address)
+						receivers = append(receivers, receiverTarget{Address: record.Address, Shard: record.Shard})
 					}
 					break
 				}
@@ -99,13 +108,13 @@ func New(cfg Config, opt Options) (*App, error) {
 
 		if len(cfg.ReceiverAddresses) == 0 && containsFold(cfg.ReceiverStatuses, record.Status) && containsAllTags(record.Tags, cfg.RequiredReceiverTags) {
 			for i := 0; i < max(1, cfg.ReceiverWeight); i++ {
-				receivers = append(receivers, record.Address)
+				receivers = append(receivers, receiverTarget{Address: record.Address, Shard: record.Shard})
 			}
 			continue
 		}
 		if len(cfg.ReceiverAddresses) == 0 && cfg.IncludeTreasuryReceiver && strings.EqualFold(record.Status, "treasury") {
 			for i := 0; i < max(1, cfg.TreasuryReceiverWeight); i++ {
-				receivers = append(receivers, record.Address)
+				receivers = append(receivers, receiverTarget{Address: record.Address, Shard: record.Shard})
 			}
 		}
 	}
@@ -115,6 +124,9 @@ func New(cfg Config, opt Options) (*App, error) {
 	}
 	if len(receivers) == 0 {
 		return nil, fmt.Errorf("no receivers matched manifest filters")
+	}
+	if err := validateShardCoverage(senders, receivers); err != nil {
+		return nil, err
 	}
 
 	return &App{
@@ -179,7 +191,11 @@ func (a *App) Run(ctx context.Context) error {
 
 	if a.opt.DryRun {
 		for i := 0; i < min(5, len(a.senders)); i++ {
-			log.Printf("[dry-run %d] sender=%s shard=%d receiver=%s value=%s", i+1, a.senders[i].Address, a.senders[i].Shard, a.receivers[i%len(a.receivers)], a.cfg.Value)
+			receiver, ok := a.pickReceiver(a.senders[i].Shard, i)
+			if !ok {
+				return fmt.Errorf("no receiver available for sender shard %d", a.senders[i].Shard)
+			}
+			log.Printf("[dry-run %d] sender=%s shard=%d receiver=%s receiverShard=%d value=%s", i+1, a.senders[i].Address, a.senders[i].Shard, receiver.Address, receiver.Shard, a.cfg.Value)
 		}
 		return nil
 	}
@@ -243,8 +259,12 @@ func (a *App) Run(ctx context.Context) error {
 					}
 					continue
 				}
-				ri := int(atomic.AddUint64(&rrRecv, 1)-1) % len(a.receivers)
-				receiver := a.receivers[ri]
+				receiver, ok := a.pickReceiver(sender.Shard, int(atomic.AddUint64(&rrRecv, 1)-1))
+				if !ok {
+					sender.release()
+					pushErr(fmt.Errorf("no receiver available for sender shard %d", sender.Shard))
+					return
+				}
 
 				var hash string
 				for {
@@ -252,7 +272,7 @@ func (a *App) Run(ctx context.Context) error {
 						return
 					}
 					var err error
-					hash, err = a.sendOne(runCtx, sender, receiver)
+					hash, err = a.sendOne(runCtx, sender, receiver.Address)
 					if err == nil {
 						sender.markSuccess(a.cfg.SuccessCooldown)
 						break
@@ -481,6 +501,43 @@ func max(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func findWalletShard(mf *manifest.Manifest, address string) (int, bool) {
+	for _, record := range mf.Wallets {
+		if strings.EqualFold(record.Address, address) {
+			return record.Shard, true
+		}
+	}
+	return 0, false
+}
+
+func validateShardCoverage(senders []senderWallet, receivers []receiverTarget) error {
+	receiverShards := make(map[int]struct{}, len(receivers))
+	for _, receiver := range receivers {
+		receiverShards[receiver.Shard] = struct{}{}
+	}
+	senderShards := make(map[int]struct{}, len(senders))
+	for _, sender := range senders {
+		senderShards[sender.Shard] = struct{}{}
+	}
+	for shard := range senderShards {
+		if _, ok := receiverShards[shard]; !ok {
+			return fmt.Errorf("no receiver available for sender shard %d", shard)
+		}
+	}
+	return nil
+}
+
+func (a *App) pickReceiver(senderShard int, start int) (receiverTarget, bool) {
+	for i := 0; i < len(a.receivers); i++ {
+		idx := (start + i) % len(a.receivers)
+		receiver := a.receivers[idx]
+		if receiver.Shard == senderShard {
+			return receiver, true
+		}
+	}
+	return receiverTarget{}, false
 }
 
 func sleepWithContext(ctx context.Context, d time.Duration) error {

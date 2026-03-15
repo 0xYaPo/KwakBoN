@@ -132,15 +132,11 @@ func (a *App) Run(ctx context.Context) error {
 		hash, err := a.sendTopUp(ctx, nonce, target)
 		if err != nil {
 			if a.shouldRefreshNonce(err) {
-				networkNonce, nErr := a.gw.GetAccountNonce(ctx, a.cfg.TreasuryAddress)
+				resyncedNonce, nErr := a.resyncTreasuryNonce(ctx, nonce, target.Address)
 				if nErr != nil {
-					return fmt.Errorf("fund %s failed with nonce issue and treasury nonce refresh failed: %w", target.Address, nErr)
+					return fmt.Errorf("fund %s failed with nonce issue and treasury nonce resync failed: %w", target.Address, nErr)
 				}
-				log.Printf("[fundwallets] treasury nonce resync old=%d new=%d target=%s", nonce, networkNonce, target.Address)
-				nonce = networkNonce
-				if sleepErr := sleepWithContext(ctx, a.cfg.NonceRetryCooldown); sleepErr != nil {
-					return sleepErr
-				}
+				nonce = resyncedNonce
 				hash, err = a.sendTopUp(ctx, nonce, target)
 				if err != nil {
 					return fmt.Errorf("fund %s after nonce resync: %w", target.Address, err)
@@ -356,6 +352,33 @@ func (a *App) shouldRefreshNonce(err error) bool {
 	}
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "lowernonceintx") || strings.Contains(msg, "veryhighnonceintx")
+}
+
+func (a *App) resyncTreasuryNonce(ctx context.Context, currentNonce uint64, targetAddress string) (uint64, error) {
+	bestNonce := currentNonce
+	for attempt := 1; attempt <= a.cfg.NonceResyncAttempts; attempt++ {
+		if sleepErr := sleepWithContext(ctx, a.cfg.NonceRetryCooldown); sleepErr != nil {
+			return 0, sleepErr
+		}
+		networkNonce, err := a.gw.GetAccountNonce(ctx, a.cfg.TreasuryAddress)
+		if err != nil {
+			if attempt == a.cfg.NonceResyncAttempts {
+				return 0, err
+			}
+			continue
+		}
+		if networkNonce > bestNonce {
+			bestNonce = networkNonce
+		}
+		log.Printf("[fundwallets] treasury nonce resync target=%s attempt=%d current=%d observed=%d best=%d", targetAddress, attempt, currentNonce, networkNonce, bestNonce)
+		if networkNonce >= currentNonce {
+			return networkNonce, nil
+		}
+	}
+	if bestNonce > currentNonce {
+		return bestNonce, nil
+	}
+	return 0, fmt.Errorf("stale treasury nonce after %d attempts: current=%d bestObserved=%d", a.cfg.NonceResyncAttempts, currentNonce, bestNonce)
 }
 
 func sleepWithContext(ctx context.Context, d time.Duration) error {

@@ -30,6 +30,7 @@ type Config struct {
 	NonceRefreshEvery    int
 	SendCooldown         time.Duration
 	NonceRetryCooldown   time.Duration
+	NonceResyncAttempts  int
 }
 
 func getenv(key, def string) string {
@@ -151,6 +152,13 @@ func LoadConfigFromEnv() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	nonceResyncAttempts, err := mustInt("FUND_NONCE_RESYNC_ATTEMPTS", 4)
+	if err != nil {
+		return Config{}, err
+	}
+	if nonceResyncAttempts <= 0 {
+		return Config{}, fmt.Errorf("FUND_NONCE_RESYNC_ATTEMPTS must be > 0")
+	}
 
 	targets := map[string]string{
 		"active_candidate": getenv("FUND_TARGET_ACTIVE_EGLD", "0.6"),
@@ -178,6 +186,7 @@ func LoadConfigFromEnv() (Config, error) {
 		NonceRefreshEvery:    nonceRefreshEvery,
 		SendCooldown:         sendCooldown,
 		NonceRetryCooldown:   nonceRetryCooldown,
+		NonceResyncAttempts:  nonceResyncAttempts,
 	}
 
 	if cfg.TreasuryAddress == "" || cfg.TreasuryPemPath == "" {
