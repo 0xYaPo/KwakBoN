@@ -77,11 +77,16 @@ This command:
 
 ## Funding
 
-Fund Window A senders from the treasury wallet up to target EGLD balances:
+Fund matched sender wallets from the treasury wallet up to target EGLD balances:
 
 ```bash
 go run ./cmd/fundwallets --dry-run
 ```
+
+Current funding flow is hardened for treasury nonce pressure:
+- periodic treasury nonce refresh during large batches
+- short cooldown between treasury sends
+- nonce resync and retry on `veryHighNonceInTx` / `lowerNonceInTx`
 
 Key environment variables:
 - `WALLETS_MANIFEST`
@@ -92,6 +97,10 @@ Key environment variables:
 - `FUND_SHARD_FILTER`
 - `FUND_TARGET_ACTIVE_EGLD`
 - `FUND_TARGET_RESERVE_EGLD`
+- `FUND_NONCE_REFRESH_EVERY`
+- `FUND_SEND_COOLDOWN_MS`
+- `FUND_NONCE_RETRY_COOLDOWN_MS`
+- `FUND_NONCE_RESYNC_ATTEMPTS`
 
 Helper script:
 - [run-fund-window-a.ps1](/C:/Users/portyp/Mvx/KwakBoN/run-fund-window-a.ps1)
@@ -116,13 +125,19 @@ Key environment variables:
 Helper script:
 - [run-sweep-window-a.ps1](/C:/Users/portyp/Mvx/KwakBoN/run-sweep-window-a.ps1)
 
-## Window A Sender
+## Sender
 
-Run the Window A manifest-driven `MoveBalance` sender:
+Run the manifest-driven `MoveBalance` sender:
 
 ```bash
 go run ./cmd/windowsprint --dry-run
 ```
+
+Current sender behavior:
+- sender selection comes from manifest status/tag filters
+- receiver routing is shard-aware: a sender only picks receivers from its own shard
+- per-wallet inflight limit and cooldowns reduce nonce drift under congestion
+- transient gateway errors do not immediately kill the run
 
 Key environment variables:
 - `WALLETS_MANIFEST`
@@ -146,6 +161,14 @@ Key environment variables:
 
 Helper script:
 - [run-window-a.ps1](/C:/Users/portyp/Mvx/KwakBoN/run-window-a.ps1)
+
+## Validated Test Profiles
+
+Observed on `prepSupernova`:
+- Window A profile: `250` senders, shard `2`, same-shard receivers, `750 TPS`, `192` workers, `20,000/20,000 success`
+- Window A upper-bound probe: `250` senders, `1500 TPS`, `20,000/20,000 success`
+- Window B profile: `497` senders, all shards, shard-aware receivers, `700 TPS`, `192` workers, `20,000/20,000 success`
+- Funding retry/resume for large treasury batches completed successfully after hardening
 
 ## Local setup
 
