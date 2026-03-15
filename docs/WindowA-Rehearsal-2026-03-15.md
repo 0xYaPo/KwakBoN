@@ -22,6 +22,15 @@ Funding rehearsal:
   - `100` warm reserves to `0.2 EGLD`
 - total distributed: `110 EGLD`
 
+Sweep rehearsal:
+- tool: `cmd/sweepwallets`
+- result: `250/250 success`
+- swept back to treasury: `107.112499999999942500 EGLD`
+- the difference versus the initial `110 EGLD` distribution is explained by:
+  - funding tx fees
+  - sender rehearsal fees
+  - sweep tx fees
+
 Sender rehearsal results:
 
 1. `500 tx @ 50 TPS`
@@ -60,6 +69,7 @@ Observed conclusions:
 - confirmation lag remained manageable
 - the current sender architecture is validated at least through `800 TPS`
 - the planned Window A operating band of `650-750 TPS` has headroom
+- funding and post-window treasury recovery both worked cleanly across the full shard-2 sender pool
 
 Recommended live baseline for Window A:
 - senders: `150` shard-2 wallets

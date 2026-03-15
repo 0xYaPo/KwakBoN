@@ -35,6 +35,11 @@ Funding rehearsal:
 - `250/250` funding transfers succeeded
 - total distributed: `110 EGLD`
 
+Sweep rehearsal:
+- `250/250` sweep-back transfers succeeded
+- total recovered to treasury: `107.112499999999942500 EGLD`
+- remaining spread is attributable to tx fees consumed during funding, sender rehearsals, and sweep-back
+
 Sender rehearsals:
 - `500 tx @ 50 TPS`: `500/500 success`
 - `2,000 tx @ 100 TPS`: `2,000/2,000 success`
@@ -48,6 +53,7 @@ Current conclusion:
 - the planned Window A operating band of `650-750 TPS` is inside the validated range
 - default live launch should start around `700 TPS`
 - scale upward only if early live acceptance remains clean
+- treasury recovery workflow is validated and usable for the Window A to Window B transition
 
 ## 1. Wallet Generation And Shard Sorting
 
