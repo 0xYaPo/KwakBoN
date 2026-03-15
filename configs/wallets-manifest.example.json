@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "generatedAt": "2026-03-15T00:00:00Z",
+  "wallets": [
+    {
+      "walletId": "treasury-shard2",
+      "address": "erd1n28dse0sej7m2rz02ceftr30596arzx2a0trcegl9p3ztdagjahqa9szcx",
+      "shard": 2,
+      "pemFile": "treasury-shard2.pem",
+      "pemPath": "./wallets/treasury-shard2.pem",
+      "status": "treasury",
+      "tags": ["treasury", "window_a", "shard2"],
+      "enabled": true,
+      "notes": "Guild funding lands here at 15:45 UTC."
+    },
+    {
+      "walletId": "sink-shard2-a",
+      "address": "erd16sjyu26hhsgfhqemv335l3u3s6mvzuae78ldgjh4wcrkwtmtwprqj6d66t",
+      "shard": 2,
+      "pemFile": "sink-shard2-a.pem",
+      "pemPath": "./wallets/sink-shard2-a.pem",
+      "status": "receiver",
+      "tags": ["sink", "window_a", "shard2"],
+      "enabled": true,
+      "notes": "Primary shard-2 sink."
+    },
+    {
+      "walletId": "sender-shard2-001",
+      "address": "erd1...",
+      "shard": 2,
+      "pemFile": "sender-shard2-001.pem",
+      "pemPath": "./wallets/sender-shard2-001.pem",
+      "status": "active_candidate",
+      "tags": ["sender", "window_a", "shard2"],
+      "enabled": true,
+      "notes": "Window A active sender candidate."
+    }
+  ]
+}
