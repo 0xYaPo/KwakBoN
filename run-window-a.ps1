@@ -5,6 +5,7 @@ param(
     [string]$ReceiverAddresses = "",
     [int]$ShardFilter = 2,
     [int]$TargetTx = 1100000,
+    [int]$DurationSeconds = 0,
     [int]$SustainedTps = 700,
     [int]$Workers = 64,
     [int]$ConfirmWorkers = 32,
@@ -12,6 +13,7 @@ param(
     [int]$GasLimit = 50000,
     [int]$GasPrice = 1000000000,
     [bool]$IncludeTreasuryReceiver = $true,
+    [bool]$ContinueOnTransientSendError = $true,
     [int]$ReceiverWeight = 4,
     [int]$TreasuryReceiverWeight = 1,
     [int]$SuccessThreshold = 1100000,
@@ -32,7 +34,9 @@ $env:SPRINT_SENDER_STATUSES = "active_candidate"
 $env:SPRINT_RECEIVER_STATUSES = "receiver"
 $env:SPRINT_REQUIRED_SENDER_TAGS = "window_a,sender"
 $env:SPRINT_REQUIRED_RECEIVER_TAGS = "window_a,sink"
+$env:SPRINT_DURATION_SECONDS = "$DurationSeconds"
 $env:INCLUDE_TREASURY_RECEIVER = "$IncludeTreasuryReceiver"
+$env:CONTINUE_ON_TRANSIENT_SEND_ERROR = "$ContinueOnTransientSendError"
 $env:RECEIVER_WEIGHT = "$ReceiverWeight"
 $env:TREASURY_RECEIVER_WEIGHT = "$TreasuryReceiverWeight"
 $env:SPRINT_TARGET_TX = "$TargetTx"

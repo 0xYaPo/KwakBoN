@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -121,7 +122,7 @@ func (c *Client) SendTx(ctx context.Context, tx TxSendRequest) (string, error) {
 		resp, err := c.http.Do(req)
 		if err != nil {
 			lastErr = err
-			if attempt == 4 || !isTransientSendError(err) {
+			if attempt == 4 || !IsTransientSendError(err) {
 				return "", err
 			}
 			if sleepErr := sleepWithContext(ctx, backoff); sleepErr != nil {
@@ -177,7 +178,7 @@ func (c *Client) SendTx(ctx context.Context, tx TxSendRequest) (string, error) {
 
 		if out.Error != "" && out.Error != "successful" {
 			err := fmt.Errorf("gateway error: %s (%s) http=%d body=%s", out.Error, out.Code, resp.StatusCode, compactBody(body))
-			if attempt == 4 || !isTransientSendError(err) {
+			if attempt == 4 || !IsTransientSendError(err) {
 				return "", err
 			}
 			lastErr = err
@@ -196,11 +197,12 @@ func (c *Client) SendTx(ctx context.Context, tx TxSendRequest) (string, error) {
 	return "", fmt.Errorf("send tx failed after retries")
 }
 
-func isTransientSendError(err error) bool {
+func IsTransientSendError(err error) bool {
 	if err == nil {
 		return false
 	}
-	if netErr, ok := err.(net.Error); ok && (netErr.Timeout() || netErr.Temporary()) {
+	var netErr net.Error
+	if errors.As(err, &netErr) && (netErr.Timeout() || netErr.Temporary()) {
 		return true
 	}
 	msg := strings.ToLower(err.Error())

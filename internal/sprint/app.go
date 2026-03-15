@@ -131,13 +131,14 @@ func (a *App) Run(ctx context.Context) error {
 	}
 
 	log.Printf(
-		"[sprint] network=%s chainID=%s gateway=%s senders=%d receivers=%d targetTx=%d tps=%d workers=%d confirmWorkers=%d value=%s gasLimit=%d gasPrice=%d waitConfirm=%t confirmTarget=%d confirmTimeout=%s shardFilter=%d",
+		"[sprint] network=%s chainID=%s gateway=%s senders=%d receivers=%d targetTx=%d duration=%s tps=%d workers=%d confirmWorkers=%d value=%s gasLimit=%d gasPrice=%d waitConfirm=%t continueOnTransient=%t confirmTarget=%d confirmTimeout=%s shardFilter=%d",
 		a.cfg.Network,
 		a.cfg.ChainID,
 		a.cfg.GatewayURL,
 		len(a.senders),
 		len(a.receivers),
 		a.cfg.TargetTx,
+		a.cfg.Duration,
 		a.cfg.SustainedTPS,
 		a.cfg.Workers,
 		a.cfg.ConfirmWorkers,
@@ -145,6 +146,7 @@ func (a *App) Run(ctx context.Context) error {
 		a.cfg.GasLimit,
 		a.cfg.GasPrice,
 		a.cfg.WaitConfirm,
+		a.cfg.ContinueOnTransientSendError,
 		a.cfg.ConfirmSuccessTarget,
 		a.cfg.ConfirmTimeout,
 		a.cfg.ShardFilter,
@@ -166,10 +168,16 @@ func (a *App) Run(ctx context.Context) error {
 
 	var issued uint64
 	var sent uint64
+	var transientSendErrors uint64
 	var rrSender uint64
 	var rrRecv uint64
 	hashes := make([]string, 0, a.cfg.TargetTx)
 	hashMu := sync.Mutex{}
+	start := time.Now()
+	sendDeadline := time.Time{}
+	if a.cfg.Duration > 0 {
+		sendDeadline = start.Add(a.cfg.Duration)
+	}
 
 	errCh := make(chan error, 1)
 	pushErr := func(err error) {
@@ -186,10 +194,16 @@ func (a *App) Run(ctx context.Context) error {
 		go func() {
 			defer wg.Done()
 			for {
+				if !sendDeadline.IsZero() && time.Now().After(sendDeadline) {
+					return
+				}
 				select {
 				case <-runCtx.Done():
 					return
 				case <-permits:
+				}
+				if !sendDeadline.IsZero() && time.Now().After(sendDeadline) {
+					return
 				}
 
 				n := int(atomic.AddUint64(&issued, 1))
@@ -202,8 +216,23 @@ func (a *App) Run(ctx context.Context) error {
 				ri := int(atomic.AddUint64(&rrRecv, 1)-1) % len(a.receivers)
 				receiver := a.receivers[ri]
 
-				hash, err := a.sendOne(runCtx, sender, receiver)
-				if err != nil {
+				var hash string
+				for {
+					if !sendDeadline.IsZero() && time.Now().After(sendDeadline) {
+						return
+					}
+					var err error
+					hash, err = a.sendOne(runCtx, sender, receiver)
+					if err == nil {
+						break
+					}
+					if a.cfg.ContinueOnTransientSendError && gateway.IsTransientSendError(err) {
+						cur := atomic.AddUint64(&transientSendErrors, 1)
+						if cur <= 20 || cur%100 == 0 {
+							log.Printf("[sprint transient-send-error] count=%d err=%v", cur, err)
+						}
+						continue
+					}
 					pushErr(err)
 					return
 				}
@@ -227,9 +256,10 @@ func (a *App) Run(ctx context.Context) error {
 	default:
 	}
 
-	if len(hashes) != a.cfg.TargetTx {
+	if a.cfg.Duration == 0 && len(hashes) != a.cfg.TargetTx {
 		return fmt.Errorf("sent %d/%d txs", len(hashes), a.cfg.TargetTx)
 	}
+	log.Printf("[sprint] send phase done issued=%d sent=%d transientSendErrors=%d elapsed=%s", issued, len(hashes), transientSendErrors, time.Since(start))
 	if !a.cfg.WaitConfirm {
 		return nil
 	}

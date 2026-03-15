@@ -31,12 +31,14 @@ type Config struct {
 	SustainedTPS  int
 	Workers       int
 	ConfirmWorkers int
+	Duration       time.Duration
 
 	Value    string
 	GasLimit uint64
 	GasPrice uint64
 
 	WaitConfirm          bool
+	ContinueOnTransientSendError bool
 	ConfirmSuccessTarget int
 	ConfirmTimeout       time.Duration
 	PollInterval         time.Duration
@@ -155,6 +157,10 @@ func LoadConfigFromEnv() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	continueOnTransient, err := mustBool("CONTINUE_ON_TRANSIENT_SEND_ERROR", true)
+	if err != nil {
+		return Config{}, err
+	}
 	confirmTarget, err := mustInt("CONFIRM_SUCCESS_TARGET", targetTx)
 	if err != nil {
 		return Config{}, err
@@ -163,6 +169,10 @@ func LoadConfigFromEnv() (Config, error) {
 		return Config{}, fmt.Errorf("CONFIRM_SUCCESS_TARGET must be between 1 and SPRINT_TARGET_TX")
 	}
 	confirmTimeout, err := mustDurationSeconds("CONFIRM_TIMEOUT_SECONDS", 0)
+	if err != nil {
+		return Config{}, err
+	}
+	duration, err := mustDurationSeconds("SPRINT_DURATION_SECONDS", 0)
 	if err != nil {
 		return Config{}, err
 	}
@@ -210,10 +220,12 @@ func LoadConfigFromEnv() (Config, error) {
 		SustainedTPS:           tps,
 		Workers:                workers,
 		ConfirmWorkers:         confirmWorkers,
+		Duration:               duration,
 		Value:                  getenv("SPRINT_TX_VALUE", "1"),
 		GasLimit:               gasLimit,
 		GasPrice:               gasPrice,
 		WaitConfirm:            waitConfirm,
+		ContinueOnTransientSendError: continueOnTransient,
 		ConfirmSuccessTarget:   confirmTarget,
 		ConfirmTimeout:         confirmTimeout,
 		PollInterval:           poll,
