@@ -122,12 +122,27 @@ func New(cfg Config, opt Options) (*App, error) {
 }
 
 func (a *App) Run(ctx context.Context) error {
+	nonceSem := make(chan struct{}, 32)
+	nonceErrCh := make(chan error, len(a.senders))
+	var nonceWg sync.WaitGroup
 	for i := range a.senders {
-		nonce, err := a.gw.GetAccountNonce(ctx, a.senders[i].Address)
-		if err != nil {
-			return fmt.Errorf("get nonce for %s: %w", a.senders[i].Address, err)
-		}
-		a.senders[i].SetNonce(nonce)
+		nonceWg.Add(1)
+		go func(i int) {
+			defer nonceWg.Done()
+			nonceSem <- struct{}{}
+			defer func() { <-nonceSem }()
+			nonce, err := a.gw.GetAccountNonce(ctx, a.senders[i].Address)
+			if err != nil {
+				nonceErrCh <- fmt.Errorf("get nonce for %s: %w", a.senders[i].Address, err)
+				return
+			}
+			a.senders[i].SetNonce(nonce)
+		}(i)
+	}
+	nonceWg.Wait()
+	close(nonceErrCh)
+	if err := <-nonceErrCh; err != nil {
+		return err
 	}
 
 	log.Printf(
@@ -230,6 +245,9 @@ func (a *App) Run(ctx context.Context) error {
 						cur := atomic.AddUint64(&transientSendErrors, 1)
 						if cur <= 20 || cur%100 == 0 {
 							log.Printf("[sprint transient-send-error] count=%d err=%v", cur, err)
+						}
+						if strings.Contains(err.Error(), "lowerNonceInTx") {
+							time.Sleep(500 * time.Millisecond)
 						}
 						continue
 					}

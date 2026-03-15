@@ -8,6 +8,7 @@ import (
 	"math/big"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"kwakbon/internal/esdt"
@@ -143,37 +144,68 @@ func (a *App) Run(ctx context.Context) error {
 }
 
 func (a *App) computeTargets(ctx context.Context) ([]fundingTarget, *big.Int, error) {
+	type result struct {
+		target fundingTarget
+		skip   bool
+		err    error
+	}
+
+	results := make([]result, len(a.records))
+	sem := make(chan struct{}, 32)
+	var wg sync.WaitGroup
+
+	for i, record := range a.records {
+		wg.Add(1)
+		go func(i int, record manifest.WalletRecord) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			targetHuman := a.cfg.TargetAmountByStatus[record.Status]
+			targetBase, err := esdt.AmountToBaseUnits(targetHuman, 18)
+			if err != nil {
+				results[i] = result{err: fmt.Errorf("invalid target amount for status %s: %w", record.Status, err)}
+				return
+			}
+			balanceStr, err := a.gw.GetAccountBalance(ctx, record.Address)
+			if err != nil {
+				results[i] = result{err: fmt.Errorf("get balance for %s: %w", record.Address, err)}
+				return
+			}
+			currentBase, ok := new(big.Int).SetString(balanceStr, 10)
+			if !ok {
+				results[i] = result{err: fmt.Errorf("invalid balance for %s: %s", record.Address, balanceStr)}
+				return
+			}
+			if currentBase.Cmp(targetBase) >= 0 {
+				results[i] = result{skip: true}
+				return
+			}
+			deficit := new(big.Int).Sub(targetBase, currentBase)
+			results[i] = result{target: fundingTarget{
+				WalletID:    record.WalletID,
+				Address:     record.Address,
+				Shard:       record.Shard,
+				Status:      record.Status,
+				CurrentBase: currentBase,
+				TargetBase:  targetBase,
+				DeficitBase: deficit,
+			}}
+		}(i, record)
+	}
+	wg.Wait()
+
 	out := make([]fundingTarget, 0, len(a.records))
 	total := big.NewInt(0)
-
-	for _, record := range a.records {
-		targetHuman := a.cfg.TargetAmountByStatus[record.Status]
-		targetBase, err := esdt.AmountToBaseUnits(targetHuman, 18)
-		if err != nil {
-			return nil, nil, fmt.Errorf("invalid target amount for status %s: %w", record.Status, err)
+	for _, r := range results {
+		if r.err != nil {
+			return nil, nil, r.err
 		}
-		balanceStr, err := a.gw.GetAccountBalance(ctx, record.Address)
-		if err != nil {
-			return nil, nil, fmt.Errorf("get balance for %s: %w", record.Address, err)
-		}
-		currentBase, ok := new(big.Int).SetString(balanceStr, 10)
-		if !ok {
-			return nil, nil, fmt.Errorf("invalid balance for %s: %s", record.Address, balanceStr)
-		}
-		if currentBase.Cmp(targetBase) >= 0 {
+		if r.skip {
 			continue
 		}
-		deficit := new(big.Int).Sub(targetBase, currentBase)
-		total.Add(total, deficit)
-		out = append(out, fundingTarget{
-			WalletID:    record.WalletID,
-			Address:     record.Address,
-			Shard:       record.Shard,
-			Status:      record.Status,
-			CurrentBase: currentBase,
-			TargetBase:  targetBase,
-			DeficitBase: deficit,
-		})
+		total.Add(total, r.target.DeficitBase)
+		out = append(out, r.target)
 	}
 
 	sort.Slice(out, func(i, j int) bool {
