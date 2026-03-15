@@ -16,11 +16,12 @@ type Config struct {
 
 	ManifestPath string
 
-	SenderStatuses []string
-	ReceiverStatuses []string
-	RequiredSenderTags []string
+	SenderStatuses       []string
+	ReceiverStatuses     []string
+	ReceiverAddresses    []string
+	RequiredSenderTags   []string
 	RequiredReceiverTags []string
-	ShardFilter int
+	ShardFilter          int
 
 	IncludeTreasuryReceiver bool
 	ReceiverWeight          int
@@ -198,6 +199,7 @@ func LoadConfigFromEnv() (Config, error) {
 		ManifestPath:           getenv("WALLETS_MANIFEST", "./configs/wallets-manifest.json"),
 		SenderStatuses:         splitCSV(getenv("SPRINT_SENDER_STATUSES", "active_candidate")),
 		ReceiverStatuses:       splitCSV(getenv("SPRINT_RECEIVER_STATUSES", "receiver")),
+		ReceiverAddresses:      splitCSV(getenv("SPRINT_RECEIVER_ADDRESSES", "")),
 		RequiredSenderTags:     splitCSV(getenv("SPRINT_REQUIRED_SENDER_TAGS", "window_a,sender")),
 		RequiredReceiverTags:   splitCSV(getenv("SPRINT_REQUIRED_RECEIVER_TAGS", "window_a,sink")),
 		ShardFilter:            shardFilter,

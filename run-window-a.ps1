@@ -2,6 +2,7 @@ param(
     [string]$GatewayUrl = "https://api.battleofnodes.com",
     [string]$ChainId = "B",
     [string]$ManifestPath = "./configs/wallets-manifest.json",
+    [string]$ReceiverAddresses = "",
     [int]$ShardFilter = 2,
     [int]$TargetTx = 1100000,
     [int]$SustainedTps = 700,
@@ -25,6 +26,7 @@ $env:GATEWAY_URL = $GatewayUrl
 $env:CHAIN_ID = $ChainId
 $env:TX_VERSION = "2"
 $env:WALLETS_MANIFEST = $ManifestPath
+$env:SPRINT_RECEIVER_ADDRESSES = $ReceiverAddresses
 $env:SPRINT_SHARD_FILTER = "$ShardFilter"
 $env:SPRINT_SENDER_STATUSES = "active_candidate"
 $env:SPRINT_RECEIVER_STATUSES = "receiver"

@@ -47,6 +47,27 @@ func New(cfg Config, opt Options) (*App, error) {
 	senders := make([]senderWallet, 0)
 	receivers := make([]string, 0)
 
+	if len(cfg.ReceiverAddresses) > 0 {
+		for _, address := range cfg.ReceiverAddresses {
+			for i := 0; i < max(1, cfg.ReceiverWeight); i++ {
+				receivers = append(receivers, address)
+			}
+		}
+		if cfg.IncludeTreasuryReceiver {
+			for _, record := range mf.Wallets {
+				if !record.Enabled {
+					continue
+				}
+				if strings.EqualFold(record.Status, "treasury") {
+					for i := 0; i < max(1, cfg.TreasuryReceiverWeight); i++ {
+						receivers = append(receivers, record.Address)
+					}
+					break
+				}
+			}
+		}
+	}
+
 	for _, record := range mf.Wallets {
 		if !record.Enabled {
 			continue
@@ -71,13 +92,13 @@ func New(cfg Config, opt Options) (*App, error) {
 			continue
 		}
 
-		if containsFold(cfg.ReceiverStatuses, record.Status) && containsAllTags(record.Tags, cfg.RequiredReceiverTags) {
+		if len(cfg.ReceiverAddresses) == 0 && containsFold(cfg.ReceiverStatuses, record.Status) && containsAllTags(record.Tags, cfg.RequiredReceiverTags) {
 			for i := 0; i < max(1, cfg.ReceiverWeight); i++ {
 				receivers = append(receivers, record.Address)
 			}
 			continue
 		}
-		if cfg.IncludeTreasuryReceiver && strings.EqualFold(record.Status, "treasury") {
+		if len(cfg.ReceiverAddresses) == 0 && cfg.IncludeTreasuryReceiver && strings.EqualFold(record.Status, "treasury") {
 			for i := 0; i < max(1, cfg.TreasuryReceiverWeight); i++ {
 				receivers = append(receivers, record.Address)
 			}

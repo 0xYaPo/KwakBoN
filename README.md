@@ -126,6 +126,7 @@ go run ./cmd/windowsprint --dry-run
 
 Key environment variables:
 - `WALLETS_MANIFEST`
+- `SPRINT_RECEIVER_ADDRESSES`
 - `SPRINT_SENDER_STATUSES`
 - `SPRINT_RECEIVER_STATUSES`
 - `SPRINT_REQUIRED_SENDER_TAGS`

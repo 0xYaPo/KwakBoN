@@ -23,6 +23,32 @@ Date context:
 - warm reserve preload target: `0.15-0.2 EGLD per wallet`
 - treasury retains the rest
 
+## Rehearsal Results
+
+Validated on March 15, 2026 using:
+- `150` shard-2 senders
+- funded sender pool from treasury
+- single forced rehearsal receiver: `erd1tn5ar9t25p4355kr0fgazjyar39yumykw99e7dzdjze38dasqfwqrydsaa`
+- same sender engine planned for Window A
+
+Funding rehearsal:
+- `250/250` funding transfers succeeded
+- total distributed: `110 EGLD`
+
+Sender rehearsals:
+- `500 tx @ 50 TPS`: `500/500 success`
+- `2,000 tx @ 100 TPS`: `2,000/2,000 success`
+- `5,000 tx @ 200 TPS`: `5,000/5,000 success`
+- `10,000 tx @ 400 TPS`: `10,000/10,000 success`
+- `20,000 tx @ 600 TPS`: `20,000/20,000 success`
+- `20,000 tx @ 800 TPS`: `20,000/20,000 success`
+
+Current conclusion:
+- the `150` shard-2 sender pool is validated through `800 TPS`
+- the planned Window A operating band of `650-750 TPS` is inside the validated range
+- default live launch should start around `700 TPS`
+- scale upward only if early live acceptance remains clean
+
 ## 1. Wallet Generation And Shard Sorting
 
 1. Generate the full wallet universe: `497 wallets`.
