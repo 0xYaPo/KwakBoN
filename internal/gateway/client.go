@@ -9,6 +9,8 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -36,46 +38,41 @@ type accountResponse struct {
 	Code  string `json:"code"`
 }
 
-func (c *Client) GetAccountNonce(ctx context.Context, bech32 string) (uint64, error) {
+func (c *Client) GetAccount(ctx context.Context, bech32 string) (uint64, string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/address/%s", c.baseURL, bech32), nil)
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	defer resp.Body.Close()
 
 	var out accountResponse
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	if out.Error != "" && out.Error != "successful" {
-		return 0, fmt.Errorf("gateway error: %s (%s)", out.Error, out.Code)
+		return 0, "", fmt.Errorf("gateway error: %s (%s)", out.Error, out.Code)
 	}
-	return out.Data.Account.Nonce, nil
+	return out.Data.Account.Nonce, out.Data.Account.Balance, nil
+}
+
+func (c *Client) GetAccountNonce(ctx context.Context, bech32 string) (uint64, error) {
+	nonce, _, err := c.GetAccount(ctx, bech32)
+	if err != nil {
+		return 0, err
+	}
+	return nonce, nil
 }
 
 func (c *Client) GetAccountBalance(ctx context.Context, bech32 string) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/address/%s", c.baseURL, bech32), nil)
+	_, balance, err := c.GetAccount(ctx, bech32)
 	if err != nil {
 		return "", err
 	}
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	var out accountResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return "", err
-	}
-	if out.Error != "" && out.Error != "successful" {
-		return "", fmt.Errorf("gateway error: %s (%s)", out.Error, out.Code)
-	}
-	return out.Data.Account.Balance, nil
+	return balance, nil
 }
 
 type TxSendRequest struct {
@@ -98,6 +95,15 @@ type TxSendRequest struct {
 type sendResponse struct {
 	Data struct {
 		TxHash string `json:"txHash"`
+	} `json:"data"`
+	Error string `json:"error"`
+	Code  string `json:"code"`
+}
+
+type sendMultipleResponse struct {
+	Data struct {
+		NumOfSentTxs int               `json:"numOfSentTxs"`
+		TxsHashes    map[string]string `json:"txsHashes"`
 	} `json:"data"`
 	Error string `json:"error"`
 	Code  string `json:"code"`
@@ -220,6 +226,112 @@ func IsTransientSendError(err error) bool {
 		strings.Contains(msg, "veryhighnonceintx")
 }
 
+func (c *Client) SendTxs(ctx context.Context, txs []TxSendRequest) ([]string, error) {
+	if len(txs) == 0 {
+		return nil, nil
+	}
+
+	b, err := json.Marshal(txs)
+	if err != nil {
+		return nil, err
+	}
+
+	var lastErr error
+	backoff := 500 * time.Millisecond
+
+	for attempt := 1; attempt <= 4; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/transaction/send-multiple", bytes.NewReader(b))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := c.http.Do(req)
+		if err != nil {
+			lastErr = err
+			if attempt == 4 || !IsTransientSendError(err) {
+				return nil, err
+			}
+			if sleepErr := sleepWithContext(ctx, backoff); sleepErr != nil {
+				return nil, sleepErr
+			}
+			backoff *= 2
+			continue
+		}
+
+		body, readErr := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if readErr != nil {
+			lastErr = readErr
+			if attempt == 4 {
+				return nil, readErr
+			}
+			if sleepErr := sleepWithContext(ctx, backoff); sleepErr != nil {
+				return nil, sleepErr
+			}
+			backoff *= 2
+			continue
+		}
+
+		var out sendMultipleResponse
+		decodeErr := json.Unmarshal(body, &out)
+		if decodeErr != nil {
+			lastErr = decodeErr
+			if attempt == 4 {
+				return nil, fmt.Errorf("send txs decode response: http=%d body=%s err=%w", resp.StatusCode, compactBody(body), decodeErr)
+			}
+			if sleepErr := sleepWithContext(ctx, backoff); sleepErr != nil {
+				return nil, sleepErr
+			}
+			backoff *= 2
+			continue
+		}
+
+		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusBadGateway || resp.StatusCode == http.StatusServiceUnavailable || resp.StatusCode == http.StatusGatewayTimeout {
+			lastErr = fmt.Errorf("gateway send-multiple returned HTTP %d body=%s", resp.StatusCode, compactBody(body))
+			if attempt == 4 {
+				return nil, lastErr
+			}
+			if sleepErr := sleepWithContext(ctx, backoff); sleepErr != nil {
+				return nil, sleepErr
+			}
+			backoff *= 2
+			continue
+		}
+
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return nil, fmt.Errorf("gateway send-multiple returned HTTP %d error=%s code=%s body=%s", resp.StatusCode, out.Error, out.Code, compactBody(body))
+		}
+
+		if out.Error != "" && out.Error != "successful" {
+			err := fmt.Errorf("gateway send-multiple error: %s (%s) http=%d body=%s", out.Error, out.Code, resp.StatusCode, compactBody(body))
+			if attempt == 4 || !IsTransientSendError(err) {
+				return nil, err
+			}
+			lastErr = err
+			if sleepErr := sleepWithContext(ctx, backoff); sleepErr != nil {
+				return nil, sleepErr
+			}
+			backoff *= 2
+			continue
+		}
+
+		hashes := orderedTxHashes(out.Data.TxsHashes)
+		if out.Data.NumOfSentTxs > 0 && out.Data.NumOfSentTxs != len(hashes) {
+			return hashes, fmt.Errorf("gateway send-multiple accepted %d/%d transactions", out.Data.NumOfSentTxs, len(txs))
+		}
+		if len(hashes) == 0 {
+			return nil, fmt.Errorf("gateway send-multiple returned no tx hashes")
+		}
+		return hashes, nil
+	}
+
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, fmt.Errorf("send txs failed after retries")
+}
+
 func sleepWithContext(ctx context.Context, d time.Duration) error {
 	t := time.NewTimer(d)
 	defer t.Stop()
@@ -241,6 +353,37 @@ func compactBody(body []byte) string {
 		return s[:400] + "..."
 	}
 	return s
+}
+
+func orderedTxHashes(in map[string]string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	type item struct {
+		idx  int
+		hash string
+	}
+	items := make([]item, 0, len(in))
+	for k, v := range in {
+		idx := len(items)
+		if parsed, err := strconv.Atoi(k); err == nil {
+			idx = parsed
+		}
+		items = append(items, item{idx: idx, hash: v})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].idx == items[j].idx {
+			return items[i].hash < items[j].hash
+		}
+		return items[i].idx < items[j].idx
+	})
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		if item.hash != "" {
+			out = append(out, item.hash)
+		}
+	}
+	return out
 }
 
 type txStatusResponse struct {

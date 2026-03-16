@@ -162,6 +162,54 @@ Key environment variables:
 Helper script:
 - [run-window-a.ps1](/C:/Users/portyp/Mvx/KwakBoN/run-window-a.ps1)
 
+## Bulk Sender
+
+Run the specialized bulk sender that uses `transaction/send-multiple`:
+
+```bash
+go run ./cmd/bulksprint --dry-run
+```
+
+Current bulk sender behavior:
+- same-shard only ring routing built directly from the selected sender set
+- one worker per active wallet
+- one nonce+balance read per batch
+- bounded nonce lookahead per wallet
+- bulk broadcast through the gateway `send-multiple` path
+- optional lightweight confirmation polling for aggregate finality checks
+
+Key environment variables:
+- `WALLETS_MANIFEST`
+- `BULK_SENDER_STATUSES`
+- `BULK_REQUIRED_TAGS`
+- `BULK_SHARD_FILTER`
+- `BULK_TARGET_TX`
+- `BULK_DURATION_SECONDS`
+- `BULK_BATCH_SIZE`
+- `BULK_MAX_NONCE_LOOKAHEAD`
+- `BULK_MAX_CONCURRENT_READS`
+- `BULK_MAX_ACTIVE_WALLETS`
+- `BULK_IDLE_SLEEP_MS`
+- `BULK_VALUE`
+- `BULK_WAIT_CONFIRM`
+- `BULK_CONFIRM_WORKERS`
+- `BULK_POLL_INTERVAL_SECONDS`
+- `BULK_CONFIRM_TIMEOUT_SECONDS`
+
+This mode is meant for throughput benchmarking on the shared API path. It is intentionally narrower and less defensive than `windowsprint`.
+
+Current validated bulk profile:
+- `BULK_BATCH_SIZE=25`
+- `BULK_MAX_NONCE_LOOKAHEAD=50`
+- `BULK_MAX_CONCURRENT_READS=24`
+
+Observed results:
+- `20,000 tx`: send phase about `4s`, `20,000/20,000 success`
+- `50,000 tx`: send phase about `13s`, `49,958/50,000 success` after `4m`, `42 pending`, `0 failed`
+
+Detailed notes:
+- [docs/BulkSprint-Benchmarks-2026-03-16.md](/C:/Users/portyp/Mvx/KwakBoN/docs/BulkSprint-Benchmarks-2026-03-16.md)
+
 ## Validated Test Profiles
 
 Observed on `prepSupernova`:
