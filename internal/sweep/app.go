@@ -141,9 +141,13 @@ func (a *App) computeTargets(ctx context.Context) ([]sweepTarget, *big.Int, erro
 	out := make([]sweepTarget, 0, len(a.records))
 	total := big.NewInt(0)
 	threshold := new(big.Int).Add(new(big.Int).Set(a.feeBase), a.minRemain)
+	start := time.Now()
+	scanned := 0
+	sweepable := 0
 
 	for _, record := range a.records {
-		balanceStr, err := a.gw.GetAccountBalance(ctx, record.Address)
+		scanned++
+		balanceStr, err := a.getBalanceWithRetry(ctx, record.Address)
 		if err != nil {
 			return nil, nil, fmt.Errorf("get balance for %s: %w", record.Address, err)
 		}
@@ -158,10 +162,21 @@ func (a *App) computeTargets(ctx context.Context) ([]sweepTarget, *big.Int, erro
 		sweepValue := new(big.Int).Sub(balance, a.feeBase)
 		sweepValue.Sub(sweepValue, a.minRemain)
 		if sweepValue.Sign() <= 0 {
+			if scanned%25 == 0 || scanned == len(a.records) {
+				log.Printf(
+					"[sweepwallets scan] scanned=%d/%d sweepable=%d totalSweepBase=%s elapsed=%s",
+					scanned,
+					len(a.records),
+					sweepable,
+					total.String(),
+					time.Since(start).Round(time.Second),
+				)
+			}
 			continue
 		}
 
 		total.Add(total, sweepValue)
+		sweepable++
 		out = append(out, sweepTarget{
 			WalletID:    record.WalletID,
 			Address:     record.Address,
@@ -171,6 +186,17 @@ func (a *App) computeTargets(ctx context.Context) ([]sweepTarget, *big.Int, erro
 			SweepBase:   sweepValue,
 			PemPath:     record.PemPath,
 		})
+
+		if scanned%25 == 0 || scanned == len(a.records) {
+			log.Printf(
+				"[sweepwallets scan] scanned=%d/%d sweepable=%d totalSweepBase=%s elapsed=%s",
+				scanned,
+				len(a.records),
+				sweepable,
+				total.String(),
+				time.Since(start).Round(time.Second),
+			)
+		}
 	}
 
 	sort.Slice(out, func(i, j int) bool {
@@ -181,6 +207,45 @@ func (a *App) computeTargets(ctx context.Context) ([]sweepTarget, *big.Int, erro
 	})
 
 	return out, total, nil
+}
+
+func (a *App) getBalanceWithRetry(ctx context.Context, address string) (string, error) {
+	var lastErr error
+	for attempt := 1; attempt <= 4; attempt++ {
+		balanceStr, err := a.gw.GetAccountBalance(ctx, address)
+		if err == nil {
+			return balanceStr, nil
+		}
+		lastErr = err
+		if attempt == 4 || !isTransientBalanceError(err) {
+			break
+		}
+		log.Printf("[sweepwallets balance-retry] wallet=%s attempt=%d err=%v", address, attempt, err)
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(time.Duration(attempt) * 500 * time.Millisecond):
+		}
+	}
+	return "", lastErr
+}
+
+func isTransientBalanceError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "deadline exceeded") ||
+		strings.Contains(msg, "timeout") ||
+		strings.Contains(msg, "temporarily unavailable") ||
+		strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "eof") ||
+		strings.Contains(msg, "bad request") ||
+		strings.Contains(msg, "too many requests") ||
+		strings.Contains(msg, "bad gateway") ||
+		strings.Contains(msg, "service unavailable") ||
+		strings.Contains(msg, "gateway timeout") ||
+		strings.Contains(msg, "invalid character '<'")
 }
 
 func (a *App) sendSweep(ctx context.Context, target sweepTarget) (string, error) {
