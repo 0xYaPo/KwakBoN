@@ -1,0 +1,221 @@
+$ set -a && source .env && set +a
+$ go run ./cmd/fundwallets --dry-run
+2026/03/15 16:33:32 [fundwallets] treasury=erd1n28dse0sej7m2rz02ceftr30596arzx2a0trcegl9p3ztdagjahqa9szcx matched=250 needingTopUp=250 shardFilter=2 include=active_candidate,warm_reserve tags=window_a totalDeficitBase=110000000000000000000
+2026/03/15 16:33:32 [dry-run] wallet=erd1gcfd4g6900lslupw3u53shp4j8cf39xwfp0gzwzdnmk4xutlqv8qut8ep8 status=active_candidate shard=2 current=0 target=600000000000000000 deficit=600000000000000000
+2026/03/15 16:33:32 [dry-run] wallet=erd18uawz7mrtwzcxlak9yly8xqf6z92fhdzw53mcjwy95tqgzcsnnpqrj2g9v status=active_candidate shard=2 current=0 target=600000000000000000 deficit=600000000000000000
+2026/03/15 16:33:32 [dry-run] wallet=erd1cuf448nw8zfz2zxyhlnxv7z7xc7s38dtvt29uk6a5memlnnc65nq8usvgq status=active_candidate shard=2 current=0 target=600000000000000000 deficit=600000000000000000
+2026/03/15 16:33:32 [dry-run] wallet=erd166jqvazc4u6lhpgp3yadjhts8pr6jgv6qf555lwzv53efxpnkfeqlqz3fj status=active_candidate shard=2 current=0 target=600000000000000000 deficit=600000000000000000
+2026/03/15 16:33:32 [dry-run] wallet=erd15gtr393esu06p8pgk4rv3r7humlff7npp8l9hmhqxdks0e9hxr0qgxtq3e status=active_candidate shard=2 current=0 target=600000000000000000 deficit=600000000000000000
+2026/03/15 16:33:32 [dry-run] wallet=erd1nrrfkxltpc2alwrp72c7szjfqm20q9jucswv0hp45t7dddygr29qs3p3ln status=active_candidate shard=2 current=0 target=600000000000000000 deficit=600000000000000000
+2026/03/15 16:33:32 [dry-run] wallet=erd14hjw02v803rs5pztsza0rphwgyu7hd5se52pp55vj8vmp5tnqd4qc5k95u status=active_candidate shard=2 current=0 target=600000000000000000 deficit=600000000000000000
+2026/03/15 16:33:32 [dry-run] wallet=erd1l4ah6cflgnkmnh9jz0nt4596a6p8r5u35lcz855udlddc3nkaepq6xdrjc status=active_candidate shard=2 current=0 target=600000000000000000 deficit=600000000000000000
+2026/03/15 16:33:32 [dry-run] wallet=erd1qrdruuqsce37yhctlwgqm8cjjm3qrqx73495dkac0tw6gjcymveqdq2jmg status=active_candidate shard=2 current=0 target=600000000000000000 deficit=600000000000000000
+2026/03/15 16:33:32 [dry-run] wallet=erd12wrezhtpqwty0lpf3kpxqmrx8ehzzpwscw0r4kyw32u9hytqg8tqv4nvsa status=active_candidate shard=2 current=0 target=600000000000000000 deficit=600000000000000000
+[fundwallets] done in 13.914564762s
+$ bash scripts/check_treasury.sh
+address : erd1n28dse0sej7m2rz02ceftr30596arzx2a0trcegl9p3ztdagjahqa9szcx
+
+  mainnet       0.000000 EGLD   (nonce=0  shard=2)
+  devnet        4.998239 EGLD   (nonce=2  shard=2)
+  battle        2517.140950 EGLD   (nonce=501  shard=2)
+$ go run ./cmd/fundwallets
+2026/03/15 16:36:30 [fundwallets] treasury=erd1n28dse0sej7m2rz02ceftr30596arzx2a0trcegl9p3ztdagjahqa9szcx matched=250 needingTopUp=250 shardFilter=2 include=active_candidate,warm_reserve tags=window_a totalDeficitBase=110000000000000000000
+2026/03/15 16:36:32 [fundwallets] sent=25/250
+2026/03/15 16:36:33 [fundwallets] sent=50/250
+2026/03/15 16:36:34 [fundwallets] sent=75/250
+2026/03/15 16:36:36 [fundwallets] sent=100/250
+2026/03/15 16:36:37 [fundwallets] sent=125/250
+2026/03/15 16:36:39 [fundwallets] sent=150/250
+2026/03/15 16:36:40 [fundwallets] sent=175/250
+2026/03/15 16:36:41 run error: fund erd12a9gcnw8mu8kz4cvfwrjkwlhqcwka0h8cucxfhujuysppzzqykpq9e8nep: gateway send returned HTTP 400 error=transaction generation failed: invalid transaction lowerNonceInTx: false, veryHighNonceInTx: true code=internal_issue body={"data":null,"error":"transaction generation failed: invalid transaction lowerNonceInTx: false, veryHighNonceInTx: true","code":"internal_issue"}
+exit status 1
+$ ^C
+$ go run ./cmd/fundwallets
+2026/03/15 16:41:20 [fundwallets] treasury=erd1n28dse0sej7m2rz02ceftr30596arzx2a0trcegl9p3ztdagjahqa9szcx matched=250 needingTopUp=61 shardFilter=2 include=active_candidate,warm_reserve tags=window_a totalDeficitBase=12200000000000000000
+2026/03/15 16:41:22 [fundwallets] sent=25/61
+2026/03/15 16:41:23 [fundwallets] sent=50/61
+2026/03/15 16:41:24 [fundwallets] sent=61/61
+2026/03/15 16:41:45 [fundwallets confirm] pending=1 success=60 failed=0
+2026/03/15 16:41:48 [fundwallets confirm] pending=0 success=61 failed=0
+2026/03/15 16:41:48 [fundwallets] confirmations done success=61 failed=0 total=61
+[fundwallets] done in 41.43051295s
+$ go run ./cmd/sweepwallets
+2026/03/15 16:43:30 [sweepwallets] treasury=erd1n28dse0sej7m2rz02ceftr30596arzx2a0trcegl9p3ztdagjahqa9szcx matched=250 sweepable=250 shardFilter=2 include=active_candidate,warm_reserve tags=window_a totalSweepBase=109987500000000000000
+2026/03/15 16:43:33 [sweepwallets] sent=25/250
+2026/03/15 16:43:35 [sweepwallets] sent=50/250
+2026/03/15 16:43:38 [sweepwallets] sent=75/250
+2026/03/15 16:43:41 [sweepwallets] sent=100/250
+2026/03/15 16:43:43 [sweepwallets] sent=125/250
+2026/03/15 16:43:46 [sweepwallets] sent=150/250
+2026/03/15 16:43:49 [sweepwallets] sent=175/250
+2026/03/15 16:43:52 [sweepwallets] sent=200/250
+2026/03/15 16:43:55 [sweepwallets] sent=225/250
+2026/03/15 16:43:57 [sweepwallets] sent=250/250
+2026/03/15 16:44:42 [sweepwallets confirm] pending=2 success=248 failed=0
+2026/03/15 16:44:46 [sweepwallets confirm] pending=0 success=250 failed=0
+2026/03/15 16:44:46 [sweepwallets] confirmations done success=250 failed=0 total=250
+[sweepwallets] done in 1m28.957587605s
+$ set -a && source .env && set +a
+$ go run ./cmd/fundwallets
+2026/03/15 17:05:15 [fundwallets] treasury=erd1n28dse0sej7m2rz02ceftr30596arzx2a0trcegl9p3ztdagjahqa9szcx matched=250 needingTopUp=250 shardFilter=2 include=active_candidate,warm_reserve tags=window_a totalDeficitBase=110000000000000000000
+2026/03/15 17:05:16 [fundwallets] sent=25/250
+2026/03/15 17:05:18 [fundwallets] sent=50/250
+2026/03/15 17:05:20 [fundwallets] sent=75/250
+2026/03/15 17:05:21 [fundwallets] sent=100/250
+2026/03/15 17:05:24 [fundwallets] sent=125/250
+2026/03/15 17:05:26 [fundwallets] sent=150/250
+2026/03/15 17:05:29 [fundwallets] sent=175/250
+2026/03/15 17:05:31 [fundwallets] sent=200/250
+2026/03/15 17:05:33 [fundwallets] sent=225/250
+2026/03/15 17:05:35 [fundwallets] sent=250/250
+2026/03/15 17:06:42 [fundwallets confirm] pending=0 success=250 failed=0
+2026/03/15 17:06:42 [fundwallets] confirmations done success=250 failed=0 total=250
+[fundwallets] done in 1m45.848388552s
+$ go run ./cmd/windowsprint
+2026/03/15 17:06:56 [sprint] network=battle chainID=B gateway=https://api.battleofnodes.com senders=150 receivers=5 targetTx=2000000 duration=0s tps=800 workers=64 confirmWorkers=32 value=1 gasLimit=50000 gasPrice=1000000000 waitConfirm=true continueOnTransient=true confirmTarget=2000000 confirmTimeout=0s shardFilter=2
+2026/03/15 17:07:17 [sprint] sent=10000/2000000
+2026/03/15 17:07:39 [sprint] sent=20000/2000000
+2026/03/15 17:08:00 [sprint] sent=30000/2000000
+2026/03/15 17:08:20 [sprint] sent=40000/2000000
+2026/03/15 17:08:41 [sprint] sent=50000/2000000
+2026/03/15 17:09:01 [sprint] sent=60000/2000000
+2026/03/15 17:09:23 [sprint] sent=70000/2000000
+2026/03/15 17:09:44 [sprint] sent=80000/2000000
+2026/03/15 17:10:06 [sprint] sent=90000/2000000
+2026/03/15 17:10:29 [sprint] sent=100000/2000000
+2026/03/15 17:10:51 [sprint] sent=110000/2000000
+2026/03/15 17:11:13 [sprint] sent=120000/2000000
+2026/03/15 17:11:35 [sprint] sent=130000/2000000
+2026/03/15 17:11:56 [sprint] sent=140000/2000000
+2026/03/15 17:12:19 [sprint] sent=150000/2000000
+2026/03/15 17:12:45 [sprint] sent=160000/2000000
+2026/03/15 17:13:29 [sprint] sent=170000/2000000
+2026/03/15 17:14:12 [sprint] sent=180000/2000000
+2026/03/15 17:14:53 [sprint] sent=190000/2000000
+2026/03/15 17:15:36 [sprint] sent=200000/2000000
+2026/03/15 17:16:17 [sprint] sent=210000/2000000
+2026/03/15 17:17:00 [sprint] sent=220000/2000000
+2026/03/15 17:17:43 [sprint] sent=230000/2000000
+2026/03/15 17:18:27 [sprint] sent=240000/2000000
+2026/03/15 17:19:12 [sprint] sent=250000/2000000
+2026/03/15 17:19:53 [sprint] sent=260000/2000000
+2026/03/15 17:20:39 [sprint] sent=270000/2000000
+2026/03/15 17:21:22 [sprint] sent=280000/2000000
+2026/03/15 17:22:25 [sprint] sent=290000/2000000
+2026/03/15 17:23:23 [sprint] sent=300000/2000000
+2026/03/15 17:23:27 run error: send tx nonce=2400: gateway send returned HTTP 400 error=sending request error code=internal_issue body={"data":null,"error":"sending request error","code":"internal_issue"}
+exit status 1
+$ go run ./cmd/windowsprint
+2026/03/15 17:27:06 [sprint] network=battle chainID=B gateway=https://api.battleofnodes.com senders=150 receivers=5 targetTx=2000000 duration=0s tps=800 workers=64 confirmWorkers=32 value=1 gasLimit=50000 gasPrice=1000000000 waitConfirm=true continueOnTransient=true confirmTarget=2000000 confirmTimeout=0s shardFilter=2
+2026/03/15 17:28:11 [sprint] sent=10000/2000000
+2026/03/15 17:28:52 [sprint] sent=20000/2000000
+2026/03/15 17:29:35 [sprint] sent=30000/2000000
+2026/03/15 17:30:19 [sprint] sent=40000/2000000
+2026/03/15 17:31:02 [sprint] sent=50000/2000000
+2026/03/15 17:31:42 [sprint] sent=60000/2000000
+2026/03/15 17:32:16 [sprint] sent=70000/2000000
+2026/03/15 17:32:50 [sprint] sent=80000/2000000
+^C
+[windowsprint] stopping...
+2026/03/15 17:32:56 run error: send tx nonce=2939: context canceled
+exit status 1
+$ ^C
+$ go run ./cmd/sweepwallets
+2026/03/15 17:34:02 [sweepwallets] treasury=erd1n28dse0sej7m2rz02ceftr30596arzx2a0trcegl9p3ztdagjahqa9szcx matched=250 sweepable=250 shardFilter=2 include=active_candidate,warm_reserve tags=window_a totalSweepBase=90845999999999617170
+2026/03/15 17:34:11 [sweepwallets] sent=25/250
+2026/03/15 17:34:18 [sweepwallets] sent=50/250
+2026/03/15 17:34:25 [sweepwallets] sent=75/250
+2026/03/15 17:34:34 [sweepwallets] sent=100/250
+2026/03/15 17:34:41 [sweepwallets] sent=125/250
+2026/03/15 17:34:49 [sweepwallets] sent=150/250
+2026/03/15 17:34:56 [sweepwallets] sent=175/250
+2026/03/15 17:35:06 [sweepwallets] sent=200/250
+2026/03/15 17:35:13 [sweepwallets] sent=225/250
+2026/03/15 17:35:21 [sweepwallets] sent=250/250
+2026/03/15 17:37:34 [sweepwallets confirm] pending=1 success=249 failed=0
+2026/03/15 17:37:37 [sweepwallets confirm] pending=0 success=250 failed=0
+2026/03/15 17:37:37 [sweepwallets] confirmations done success=250 failed=0 total=250
+[sweepwallets] done in 4m13.610739482s
+$ bash scripts/check_treasury.sh
+address : erd1n28dse0sej7m2rz02ceftr30596arzx2a0trcegl9p3ztdagjahqa9szcx
+
+  mainnet       0.000000 EGLD   (nonce=0  shard=2)
+  devnet        4.998239 EGLD   (nonce=2  shard=2)
+  battle        4997.981450 EGLD   (nonce=1001  shard=2)
+$ go run ./cmd/fundwallets --dry-run
+^C
+[fundwallets] stopping...
+2026/03/15 17:44:44 run error: get balance for erd1gcfd4g6900lslupw3u53shp4j8cf39xwfp0gzwzdnmk4xutlqv8qut8ep8: Get "https://api.battleofnodes.com/address/erd1gcfd4g6900lslupw3u53shp4j8cf39xwfp0gzwzdnmk4xutlqv8qut8ep8": context canceled
+exit status 1
+$ ^C
+$ set -a && source .env && set +a
+$ go run ./cmd/fundwallets --dry-run
+2026/03/15 17:47:15 [fundwallets] treasury=erd1n28dse0sej7m2rz02ceftr30596arzx2a0trcegl9p3ztdagjahqa9szcx matched=497 needingTopUp=497 shardFilter=-1 include=active_candidate,warm_reserve,window_b_reserve tags=sender totalDeficitBase=497000000000000000000
+2026/03/15 17:47:15 [dry-run] wallet=erd1gcfd4g6900lslupw3u53shp4j8cf39xwfp0gzwzdnmk4xutlqv8qut8ep8 status=active_candidate shard=2 current=0 target=1000000000000000000 deficit=1000000000000000000
+2026/03/15 17:47:15 [dry-run] wallet=erd18uawz7mrtwzcxlak9yly8xqf6z92fhdzw53mcjwy95tqgzcsnnpqrj2g9v status=active_candidate shard=2 current=0 target=1000000000000000000 deficit=1000000000000000000
+2026/03/15 17:47:15 [dry-run] wallet=erd1cuf448nw8zfz2zxyhlnxv7z7xc7s38dtvt29uk6a5memlnnc65nq8usvgq status=active_candidate shard=2 current=0 target=1000000000000000000 deficit=1000000000000000000
+2026/03/15 17:47:15 [dry-run] wallet=erd166jqvazc4u6lhpgp3yadjhts8pr6jgv6qf555lwzv53efxpnkfeqlqz3fj status=active_candidate shard=2 current=0 target=1000000000000000000 deficit=1000000000000000000
+2026/03/15 17:47:15 [dry-run] wallet=erd15gtr393esu06p8pgk4rv3r7humlff7npp8l9hmhqxdks0e9hxr0qgxtq3e status=active_candidate shard=2 current=0 target=1000000000000000000 deficit=1000000000000000000
+2026/03/15 17:47:15 [dry-run] wallet=erd1nrrfkxltpc2alwrp72c7szjfqm20q9jucswv0hp45t7dddygr29qs3p3ln status=active_candidate shard=2 current=0 target=1000000000000000000 deficit=1000000000000000000
+2026/03/15 17:47:15 [dry-run] wallet=erd14hjw02v803rs5pztsza0rphwgyu7hd5se52pp55vj8vmp5tnqd4qc5k95u status=active_candidate shard=2 current=0 target=1000000000000000000 deficit=1000000000000000000
+2026/03/15 17:47:15 [dry-run] wallet=erd1l4ah6cflgnkmnh9jz0nt4596a6p8r5u35lcz855udlddc3nkaepq6xdrjc status=active_candidate shard=2 current=0 target=1000000000000000000 deficit=1000000000000000000
+2026/03/15 17:47:15 [dry-run] wallet=erd1qrdruuqsce37yhctlwgqm8cjjm3qrqx73495dkac0tw6gjcymveqdq2jmg status=active_candidate shard=2 current=0 target=1000000000000000000 deficit=1000000000000000000
+2026/03/15 17:47:15 [dry-run] wallet=erd12wrezhtpqwty0lpf3kpxqmrx8ehzzpwscw0r4kyw32u9hytqg8tqv4nvsa status=active_candidate shard=2 current=0 target=1000000000000000000 deficit=1000000000000000000
+[fundwallets] done in 2m21.24489228s
+$ go run ./cmd/fundwallets
+2026/03/15 17:48:23 [fundwallets] treasury=erd1n28dse0sej7m2rz02ceftr30596arzx2a0trcegl9p3ztdagjahqa9szcx matched=497 needingTopUp=497 shardFilter=-1 include=active_candidate,warm_reserve,window_b_reserve tags=sender totalDeficitBase=497000000000000000000
+2026/03/15 17:48:24 [fundwallets] sent=25/497
+2026/03/15 17:48:26 [fundwallets] sent=50/497
+2026/03/15 17:48:27 [fundwallets] sent=75/497
+2026/03/15 17:48:28 [fundwallets] sent=100/497
+2026/03/15 17:48:29 run error: fund erd1rsxq58httpch9qc4v6xmefztvtqw52r0x2xnjlz8p7wax9c4szlqrdzufn: gateway send returned HTTP 400 error=transaction generation failed: invalid transaction lowerNonceInTx: false, veryHighNonceInTx: true code=internal_issue body={"data":null,"error":"transaction generation failed: invalid transaction lowerNonceInTx: false, veryHighNonceInTx: true","code":"internal_issue"}
+exit status 1
+$ go run ./cmd/fundwallets
+^C
+[fundwallets] stopping...
+2026/03/15 17:50:59 run error: get balance for erd1h8tp2q2qevhrfrh3g67pu2tukvxafaah9q6u4dnp82lj64pvwszs0e9yuv: Get "https://api.battleofnodes.com/address/erd1h8tp2q2qevhrfrh3g67pu2tukvxafaah9q6u4dnp82lj64pvwszs0e9yuv": context canceled
+exit status 1
+$ set -a && source .env && set +a && go run ./cmd/fundwallets
+^C
+[fundwallets] stopping...
+2026/03/15 17:53:14 run error: get balance for erd1zr0eglj4huxafq3wpv62g5lp79lh9g6h4m9r567lfqcuvp9a7ulqfng3lm: Get "https://api.battleofnodes.com/address/erd1zr0eglj4huxafq3wpv62g5lp79lh9g6h4m9r567lfqcuvp9a7ulqfng3lm": context canceled
+exit status 1
+$ ^C
+$ set -a && source .env && set +a
+$ go run ./cmd/fundwallets
+^C
+[fundwallets] stopping...
+2026/03/15 17:57:19 run error: get balance for erd1mymxg7mv4ssdcsynzthlr38dkh3uphm0my2e7rer7p2xzdk44tfs3ttz5r: Get "https://api.battleofnodes.com/address/erd1mymxg7mv4ssdcsynzthlr38dkh3uphm0my2e7rer7p2xzdk44tfs3ttz5r": context canceled
+exit status 1
+$ ^C
+$ kill 82327
+bash: kill: (82327) - No such process
+$ go run ./cmd/fundwallets
+^C
+[fundwallets] stopping...
+2026/03/15 18:00:18 run error: get balance for erd194lw3vlkylc5dcahak2lqgqanrhyapzc7gxqhev63pqc9l8me89qshyg04: Get "https://api.battleofnodes.com/address/erd194lw3vlkylc5dcahak2lqgqanrhyapzc7gxqhev63pqc9l8me89qshyg04": context canceled
+exit status 1
+$ ^C
+$ kill $(pgrep -f "go run ./cmd/fundwallets") ; go run ./cmd/fundwallets
+kill: usage: kill [-s sigspec | -n signum | -sigspec] pid | jobspec ... or kill -l [sigspec]
+2026/03/15 18:00:42 [fundwallets] treasury=erd1n28dse0sej7m2rz02ceftr30596arzx2a0trcegl9p3ztdagjahqa9szcx matched=497 needingTopUp=389 shardFilter=-1 include=active_candidate,warm_reserve,window_b_reserve tags=sender totalDeficitBase=389000000000000000000
+2026/03/15 18:01:03 [fundwallets] sent=25/389
+2026/03/15 18:01:25 [fundwallets] sent=50/389
+2026/03/15 18:01:43 [fundwallets] sent=75/389
+2026/03/15 18:01:56 [fundwallets] sent=100/389
+2026/03/15 18:02:18 [fundwallets] sent=125/389
+2026/03/15 18:02:40 [fundwallets] sent=150/389
+2026/03/15 18:02:53 [fundwallets] sent=175/389
+2026/03/15 18:03:12 [fundwallets] sent=200/389
+2026/03/15 18:03:31 [fundwallets] sent=225/389
+2026/03/15 18:03:53 [fundwallets] sent=250/389
+2026/03/15 18:04:17 [fundwallets] sent=275/389
+2026/03/15 18:04:43 [fundwallets] sent=300/389
+2026/03/15 18:05:01 [fundwallets] sent=325/389
+2026/03/15 18:05:22 [fundwallets] sent=350/389
+2026/03/15 18:05:42 [fundwallets] sent=375/389
+2026/03/15 18:05:56 [fundwallets] sent=389/389
+2026/03/15 18:17:16 [fundwallets confirm] pending=0 success=389 failed=0
+2026/03/15 18:17:16 [fundwallets] confirmations done success=389 failed=0 total=389
+[fundwallets] done in 16m32.567523728s
+$ 

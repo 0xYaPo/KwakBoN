@@ -96,11 +96,12 @@ $env:TREASURY_PEM_PATH='C:\secure\mvx\treasury-shard2.pem'
 $env:FUND_INCLUDE_STATUSES='supernova_balanced_active'
 $env:FUND_REQUIRED_TAGS='sender'
 $env:FUND_SHARD_FILTER='-1'
-$env:FUND_TARGET_ACTIVE_EGLD='1.0'
-$env:FUND_TARGET_SUPERNOVA_BALANCED_ACTIVE_EGLD='1.0'
+$env:FUND_TARGET_ACTIVE_EGLD='7.0'
+$env:FUND_TARGET_SUPERNOVA_BALANCED_ACTIVE_EGLD='7.0'
 $env:FUND_TARGET_RESERVE_EGLD='1.0'
 $env:FUND_TARGET_WINDOW_B_RESERVE_EGLD='1.0'
 
+go run ./cmd/fundwallets --dry-run
 go run ./cmd/fundwallets
 ```
 

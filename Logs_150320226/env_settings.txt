@@ -1,0 +1,67 @@
+PWD_KEYSTORE=jahqa9szcx
+
+# ── Réseau ────────────────────────────────────────────────────────────────────
+DEFAULT_NETWORK=battle
+GATEWAY_URL=https://api.battleofnodes.com
+CHAIN_ID=B
+
+# ── Wallets ───────────────────────────────────────────────────────────────────
+WALLETS_MANIFEST=./configs/wallets-manifest.json
+TREASURY_ADDRESS=erd1n28dse0sej7m2rz02ceftr30596arzx2a0trcegl9p3ztdagjahqa9szcx
+TREASURY_PEM_PATH=./secrets/treasury.pem
+
+# ══════════════════════════════════════════════════════════════════════════════
+# WINDOW A — intra-shard MoveBalance, shard-2 uniquement, 30 min
+# Décommenter ce bloc et commenter le bloc Window B
+# ══════════════════════════════════════════════════════════════════════════════
+# FUND_INCLUDE_STATUSES=active_candidate,warm_reserve
+# FUND_REQUIRED_TAGS=window_a
+# FUND_SHARD_FILTER=2
+# FUND_TARGET_ACTIVE_EGLD=0.6
+# FUND_TARGET_RESERVE_EGLD=0.2
+# FUND_TARGET_WINDOW_B_RESERVE_EGLD=0.2
+#
+# SPRINT_SENDER_STATUSES=active_candidate,warm_reserve
+# SPRINT_RECEIVER_STATUSES=receiver
+# SPRINT_RECEIVER_ADDRESSES=erd16sjyu26hhsgfhqemv335l3u3s6mvzuae78ldgjh4wcrkwtmtwprqj6d66t,erd1m8sctsag8qvy6s3a53pz73wlwnh94lduz8luzjr0th65g4rl2xgqjga7lx,erd1d940d7urvw8yh42ssnk82vwr5jlwrjrcp28p9e7spj96yvt64m8s667eq4
+# SPRINT_REQUIRED_SENDER_TAGS=window_a,sender
+# SPRINT_REQUIRED_RECEIVER_TAGS=window_a,sink
+# SPRINT_SHARD_FILTER=2
+# SPRINT_TARGET_TX=1500000
+# SPRINT_DURATION_SECONDS=1800
+# SUSTAINED_TPS=800
+# SPRINT_WORKERS=512
+# SPRINT_CONFIRM_WORKERS=64
+# CONTINUE_ON_TRANSIENT_SEND_ERROR=true
+#
+# SWEEP_INCLUDE_STATUSES=active_candidate,warm_reserve
+# SWEEP_REQUIRED_TAGS=window_a
+# SWEEP_SHARD_FILTER=2
+
+# ══════════════════════════════════════════════════════════════════════════════
+# WINDOW B — tous shards, 497 wallets, 30 min
+# Décommenter ce bloc et commenter le bloc Window A
+# ══════════════════════════════════════════════════════════════════════════════
+FUND_INCLUDE_STATUSES=active_candidate,warm_reserve,window_b_reserve
+FUND_REQUIRED_TAGS=sender
+FUND_SHARD_FILTER=-1
+FUND_TARGET_ACTIVE_EGLD=1.0
+FUND_TARGET_RESERVE_EGLD=1.0
+FUND_TARGET_WINDOW_B_RESERVE_EGLD=1.0
+
+SPRINT_SENDER_STATUSES=active_candidate,warm_reserve,window_b_reserve
+SPRINT_RECEIVER_STATUSES=receiver
+SPRINT_RECEIVER_ADDRESSES=erd16sjyu26hhsgfhqemv335l3u3s6mvzuae78ldgjh4wcrkwtmtwprqj6d66t,erd1m8sctsag8qvy6s3a53pz73wlwnh94lduz8luzjr0th65g4rl2xgqjga7lx,erd1d940d7urvw8yh42ssnk82vwr5jlwrjrcp28p9e7spj96yvt64m8s667eq4
+SPRINT_REQUIRED_SENDER_TAGS=sender
+SPRINT_REQUIRED_RECEIVER_TAGS=window_a,sink
+SPRINT_SHARD_FILTER=-1
+SPRINT_TARGET_TX=10000000
+SPRINT_DURATION_SECONDS=1800
+SUSTAINED_TPS=800
+SPRINT_WORKERS=512
+SPRINT_CONFIRM_WORKERS=64
+CONTINUE_ON_TRANSIENT_SEND_ERROR=true
+
+SWEEP_INCLUDE_STATUSES=active_candidate,warm_reserve,window_b_reserve
+SWEEP_REQUIRED_TAGS=sender
+SWEEP_SHARD_FILTER=-1
