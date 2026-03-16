@@ -5,6 +5,8 @@ Clean workspace for the Guild Wars competition on MultiversX.
 Current challenge brief:
 - [docs/Supernova-Surge-2026-03-16.md](/C:/Users/portyp/Mvx/KwakBoN/docs/Supernova-Surge-2026-03-16.md)
 - [docs/Supernova-Runbook.md](/C:/Users/portyp/Mvx/KwakBoN/docs/Supernova-Runbook.md)
+- [docs/Supernova-Balanced-250-Set.md](/C:/Users/portyp/Mvx/KwakBoN/docs/Supernova-Balanced-250-Set.md)
+- [docs/BulkSprint-Benchmarks-2026-03-16.md](/C:/Users/portyp/Mvx/KwakBoN/docs/BulkSprint-Benchmarks-2026-03-16.md)
 
 ## Principles
 
@@ -207,12 +209,21 @@ Current validated bulk profile:
 - `BULK_MAX_NONCE_LOOKAHEAD=50`
 - `BULK_MAX_CONCURRENT_READS=24`
 
-Observed results:
+Earlier benchmark results:
 - `20,000 tx`: send phase about `4s`, `20,000/20,000 success`
 - `50,000 tx`: send phase about `13s`, `49,958/50,000 success` after `4m`, `42 pending`, `0 failed`
 
+Live Supernova results with the balanced `250` wallet set:
+- fixed target `100,000 tx`: `100,000/100,000 accepted` in about `32.7s`
+- duration `10 min`: `1,747,130 sent`, `1,746,002 accepted`, `15 errors`
+
+Current interpretation:
+- `bulksprint` is now a serious primary candidate on live Supernova
+- `windowsprint` remains the fallback sender and simpler operator path
+
 Detailed notes:
 - [docs/BulkSprint-Benchmarks-2026-03-16.md](/C:/Users/portyp/Mvx/KwakBoN/docs/BulkSprint-Benchmarks-2026-03-16.md)
+- [docs/BulkSprint-Roadmap.md](/C:/Users/portyp/Mvx/KwakBoN/docs/BulkSprint-Roadmap.md)
 
 ## Validated Test Profiles
 
@@ -221,6 +232,10 @@ Observed on `prepSupernova`:
 - Window A upper-bound probe: `250` senders, `1500 TPS`, `20,000/20,000 success`
 - Window B profile: `497` senders, all shards, shard-aware receivers, `700 TPS`, `192` workers, `20,000/20,000 success`
 - Funding retry/resume for large treasury batches completed successfully after hardening
+
+Observed on live Supernova:
+- balanced `windowsprint`, `250` senders, `10 min`, `1200 TPS` target: `324,160 sent`
+- balanced `bulksprint`, `250` senders, `10 min`, tuned `25/50` profile: `1,746,002 accepted`
 
 ## Local setup
 

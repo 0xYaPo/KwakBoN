@@ -37,11 +37,12 @@ type receiverTarget struct {
 }
 
 type App struct {
-	cfg       Config
-	opt       Options
-	gw        *gateway.Client
-	senders   []senderWallet
-	receivers []receiverTarget
+	cfg            Config
+	opt            Options
+	gw             *gateway.Client
+	senders        []senderWallet
+	receivers      []receiverTarget
+	reservedTarget atomic.Uint64
 }
 
 func New(cfg Config, opt Options) (*App, error) {
@@ -207,7 +208,6 @@ func (a *App) Run(ctx context.Context) error {
 	ctrl := ratelimit.NewTPSController(int64(a.cfg.SustainedTPS))
 	go ctrl.Run(runCtx, permits)
 
-	var issued uint64
 	var sent uint64
 	var transientSendErrors uint64
 	var rrSender uint64
@@ -247,13 +247,13 @@ func (a *App) Run(ctx context.Context) error {
 					return
 				}
 
-				n := int(atomic.AddUint64(&issued, 1))
-				if n > a.cfg.TargetTx {
+				if _, ok := a.reserveQuota(1); !ok {
 					return
 				}
 
 				sender, ok := a.acquireSender(int(atomic.AddUint64(&rrSender, 1) - 1))
 				if !ok {
+					a.releaseQuota(1)
 					if sleepErr := sleepWithContext(runCtx, 10*time.Millisecond); sleepErr != nil {
 						return
 					}
@@ -261,6 +261,7 @@ func (a *App) Run(ctx context.Context) error {
 				}
 				receiver, ok := a.pickReceiver(sender.Shard, int(atomic.AddUint64(&rrRecv, 1)-1))
 				if !ok {
+					a.releaseQuota(1)
 					sender.release()
 					pushErr(fmt.Errorf("no receiver available for sender shard %d", sender.Shard))
 					return
@@ -283,6 +284,7 @@ func (a *App) Run(ctx context.Context) error {
 							a.cfg.QuarantineCooldown,
 							a.cfg.QuarantineTransientThreshold,
 						)
+						a.releaseQuota(1)
 						cur := atomic.AddUint64(&transientSendErrors, 1)
 						if cur <= 20 || cur%100 == 0 {
 							log.Printf("[sprint transient-send-error] count=%d err=%v", cur, err)
@@ -295,6 +297,7 @@ func (a *App) Run(ctx context.Context) error {
 						}
 						continue
 					}
+					a.releaseQuota(1)
 					sender.release()
 					pushErr(err)
 					return
@@ -320,9 +323,9 @@ func (a *App) Run(ctx context.Context) error {
 	}
 
 	if a.cfg.Duration == 0 && len(hashes) != a.cfg.TargetTx {
-		return fmt.Errorf("sent %d/%d txs", len(hashes), a.cfg.TargetTx)
+		return fmt.Errorf("sent %d/%d txs reserved=%d transientSendErrors=%d", len(hashes), a.cfg.TargetTx, a.reservedTarget.Load(), transientSendErrors)
 	}
-	log.Printf("[sprint] send phase done issued=%d sent=%d transientSendErrors=%d elapsed=%s", issued, len(hashes), transientSendErrors, time.Since(start))
+	log.Printf("[sprint] send phase done reserved=%d sent=%d transientSendErrors=%d elapsed=%s", a.reservedTarget.Load(), len(hashes), transientSendErrors, time.Since(start))
 	if !a.cfg.WaitConfirm {
 		return nil
 	}
@@ -421,15 +424,42 @@ func (a *App) waitForFinalStatuses(ctx context.Context, hashes []string) (int, i
 		resolved := make([]string, 0, len(pending))
 		deltaSuccess := atomic.Int64{}
 		deltaFailed := atomic.Int64{}
+		checked := atomic.Int64{}
+		roundTotal := len(pending)
 
 		jobs := make(chan string)
 		var wg sync.WaitGroup
+		progressDone := make(chan struct{})
+		go func(total int) {
+			ticker := time.NewTicker(10 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-progressDone:
+					return
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					currentChecked := checked.Load()
+					currentResolved := deltaSuccess.Load() + deltaFailed.Load()
+					log.Printf(
+						"[sprint confirm progress] checked=%d/%d resolved=%d successDelta=%d failedDelta=%d",
+						currentChecked,
+						total,
+						currentResolved,
+						deltaSuccess.Load(),
+						deltaFailed.Load(),
+					)
+				}
+			}
+		}(roundTotal)
 		for i := 0; i < a.cfg.ConfirmWorkers; i++ {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
 				for h := range jobs {
 					status, err := a.gw.GetTxStatus(ctx, h)
+					checked.Add(1)
 					if err != nil {
 						continue
 					}
@@ -455,6 +485,7 @@ func (a *App) waitForFinalStatuses(ctx context.Context, hashes []string) (int, i
 		}
 		close(jobs)
 		wg.Wait()
+		close(progressDone)
 
 		for _, h := range resolved {
 			delete(pending, h)
@@ -550,6 +581,36 @@ func sleepWithContext(ctx context.Context, d time.Duration) error {
 	case <-t.C:
 		return nil
 	}
+}
+
+func (a *App) reserveQuota(limit int) (int, bool) {
+	if limit <= 0 {
+		return 0, false
+	}
+	if a.cfg.TargetTx <= 0 {
+		return limit, true
+	}
+	for {
+		current := a.reservedTarget.Load()
+		if current >= uint64(a.cfg.TargetTx) {
+			return 0, false
+		}
+		remaining := a.cfg.TargetTx - int(current)
+		n := min(limit, remaining)
+		if n <= 0 {
+			return 0, false
+		}
+		if a.reservedTarget.CompareAndSwap(current, current+uint64(n)) {
+			return n, true
+		}
+	}
+}
+
+func (a *App) releaseQuota(n int) {
+	if n <= 0 || a.cfg.TargetTx <= 0 {
+		return
+	}
+	a.reservedTarget.Add(^uint64(n - 1))
 }
 
 func (a *App) acquireSender(start int) (*senderWallet, bool) {

@@ -157,13 +157,33 @@ func (a *App) Run(ctx context.Context) error {
 
 	var wg sync.WaitGroup
 	errCh := make(chan error, 1)
-	hashesCh := make(chan []string, len(a.senders)*8)
+	var hashesCh chan []string
+	var collectedHashes []string
+	var collectorWG sync.WaitGroup
+	var hashesMu sync.Mutex
+	if a.cfg.WaitConfirm {
+		hashesCh = make(chan []string, len(a.senders)*8)
+		collectorWG.Add(1)
+		go func() {
+			defer collectorWG.Done()
+			for hashes := range hashesCh {
+				if len(hashes) == 0 {
+					continue
+				}
+				hashesMu.Lock()
+				collectedHashes = append(collectedHashes, hashes...)
+				hashesMu.Unlock()
+			}
+		}()
+	}
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	start := time.Now()
 	deadline := time.Time{}
 	if a.cfg.Duration > 0 {
 		deadline = start.Add(a.cfg.Duration)
+		runCtx, cancel = context.WithDeadline(ctx, deadline)
+		defer cancel()
 	}
 
 	for i := range a.senders {
@@ -181,7 +201,10 @@ func (a *App) Run(ctx context.Context) error {
 	}
 
 	wg.Wait()
-	close(hashesCh)
+	if hashesCh != nil {
+		close(hashesCh)
+		collectorWG.Wait()
+	}
 	select {
 	case err := <-errCh:
 		return err
@@ -200,8 +223,10 @@ func (a *App) Run(ctx context.Context) error {
 		return nil
 	}
 
-	hashes := flattenHashes(hashesCh)
-	successes, failed, err := a.waitForFinalStatuses(runCtx, hashes)
+	hashes := collectedHashes
+	confirmCtx, confirmCancel := context.WithCancel(ctx)
+	defer confirmCancel()
+	successes, failed, err := a.waitForFinalStatuses(confirmCtx, hashes)
 	if err != nil {
 		return err
 	}
@@ -331,7 +356,7 @@ func (a *App) runWallet(ctx context.Context, deadline time.Time, sw *senderWalle
 		a.totalBatches.Add(1)
 		a.totalSent.Add(uint64(batchCount))
 		a.totalAccepted.Add(uint64(len(hashes)))
-		if len(hashes) > 0 {
+		if hashesCh != nil && len(hashes) > 0 {
 			hashesCh <- hashes
 		}
 		cur := a.totalSent.Load()
@@ -468,15 +493,42 @@ func (a *App) waitForFinalStatuses(ctx context.Context, hashes []string) (int, i
 		resolved := make([]string, 0, len(pending))
 		deltaSuccess := atomic.Int64{}
 		deltaFailed := atomic.Int64{}
+		checked := atomic.Int64{}
+		roundTotal := len(pending)
 
 		jobs := make(chan string)
 		var wg sync.WaitGroup
+		progressDone := make(chan struct{})
+		go func(total int) {
+			ticker := time.NewTicker(10 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-progressDone:
+					return
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					currentChecked := checked.Load()
+					currentResolved := deltaSuccess.Load() + deltaFailed.Load()
+					log.Printf(
+						"[bulksprint confirm progress] checked=%d/%d resolved=%d successDelta=%d failedDelta=%d",
+						currentChecked,
+						total,
+						currentResolved,
+						deltaSuccess.Load(),
+						deltaFailed.Load(),
+					)
+				}
+			}
+		}(roundTotal)
 		for i := 0; i < a.cfg.ConfirmWorkers; i++ {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
 				for h := range jobs {
 					status, err := a.gw.GetTxStatus(ctx, h)
+					checked.Add(1)
 					if err != nil {
 						continue
 					}
@@ -502,6 +554,7 @@ func (a *App) waitForFinalStatuses(ctx context.Context, hashes []string) (int, i
 		}
 		close(jobs)
 		wg.Wait()
+		close(progressDone)
 
 		for _, h := range resolved {
 			delete(pending, h)

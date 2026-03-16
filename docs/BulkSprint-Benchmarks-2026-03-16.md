@@ -98,3 +98,55 @@ Current interpretation:
 - `windowsprint` remains the robust general-purpose competition sender
 - `bulksprint` is now a credible offensive sender for shared-API throughput tests
 - the tuned `25/50` profile is the first one that looks suitable for real competitive experimentation
+
+## Live Supernova Results
+
+Environment:
+- date: `2026-03-16`
+- network: live post-Supernova Battle API
+- sender set: balanced `250` wallets across shards `0/1/2`
+- manifest: `configs/wallets-manifest.supernova-balanced-250.json`
+
+Balanced `windowsprint` reference:
+- `10 min`
+- `1200 TPS` target
+- `250` senders
+- result:
+  - `324,160 sent`
+  - `15 transient send errors`
+  - elapsed: about `10m`
+
+Balanced `bulksprint` fixed-target verification:
+- `100,000 tx`
+- `BULK_WAIT_CONFIRM=false`
+- result:
+  - `100,000/100,000 accepted`
+  - `0 errors`
+  - elapsed: about `32.7s`
+
+Balanced `bulksprint` live `10 min` run:
+- `BULK_BATCH_SIZE=25`
+- `BULK_MAX_NONCE_LOOKAHEAD=50`
+- `BULK_MAX_CONCURRENT_READS=24`
+- `BULK_WAIT_CONFIRM=false`
+- result:
+  - `1,747,130 sent`
+  - `1,746,002 accepted`
+  - `69,924 batches`
+  - `15 errors`
+  - elapsed: `10m0s`
+
+Important implementation note:
+- an internal send-phase deadlock was found and fixed on `2026-03-16`
+- root cause:
+  - accepted tx hashes were buffered during send but not drained until after the send phase
+  - this created a hard plateau around `50,000 tx`
+- after the fix:
+  - fixed-target and duration bulk runs completed normally
+  - the live `10 min` benchmark above became possible
+
+Updated interpretation:
+- on live Supernova, `bulksprint` is no longer just a tactical finisher
+- with the balanced `250` wallet set and the tuned `25/50` profile, it massively outperformed `windowsprint` on raw accepted throughput
+- `windowsprint` remains the safer fallback and simpler operator path
+- `bulksprint` is now a serious primary-candidate sender for Window A style throughput pushes

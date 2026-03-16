@@ -161,9 +161,10 @@ func LoadConfigFromEnv() (Config, error) {
 	}
 
 	targets := map[string]string{
-		"active_candidate": getenv("FUND_TARGET_ACTIVE_EGLD", "0.6"),
-		"warm_reserve":     getenv("FUND_TARGET_RESERVE_EGLD", "0.2"),
-		"window_b_reserve": getenv("FUND_TARGET_WINDOW_B_RESERVE_EGLD", "0.2"),
+		"active_candidate":          getenv("FUND_TARGET_ACTIVE_EGLD", "0.6"),
+		"warm_reserve":              getenv("FUND_TARGET_RESERVE_EGLD", "0.2"),
+		"window_b_reserve":          getenv("FUND_TARGET_WINDOW_B_RESERVE_EGLD", "0.2"),
+		"supernova_balanced_active": getenv("FUND_TARGET_SUPERNOVA_BALANCED_ACTIVE_EGLD", getenv("FUND_TARGET_ACTIVE_EGLD", "0.6")),
 	}
 
 	cfg := Config{
