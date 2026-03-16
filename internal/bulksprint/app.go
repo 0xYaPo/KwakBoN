@@ -40,6 +40,9 @@ type App struct {
 	totalAccepted  atomic.Uint64
 	totalBatches   atomic.Uint64
 	totalErrors    atomic.Uint64
+	readErrors     atomic.Uint64
+	sendErrors     atomic.Uint64
+	lastBatchAt    atomic.Int64
 }
 
 func New(cfg Config, opt Options) (*App, error) {
@@ -179,12 +182,15 @@ func (a *App) Run(ctx context.Context) error {
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	start := time.Now()
+	a.lastBatchAt.Store(start.UnixNano())
 	deadline := time.Time{}
 	if a.cfg.Duration > 0 {
 		deadline = start.Add(a.cfg.Duration)
 		runCtx, cancel = context.WithDeadline(ctx, deadline)
 		defer cancel()
 	}
+	heartbeatDone := make(chan struct{})
+	go a.logHeartbeat(runCtx, start, heartbeatDone)
 
 	for i := range a.senders {
 		wg.Add(1)
@@ -201,6 +207,7 @@ func (a *App) Run(ctx context.Context) error {
 	}
 
 	wg.Wait()
+	close(heartbeatDone)
 	if hashesCh != nil {
 		close(hashesCh)
 		collectorWG.Wait()
@@ -255,6 +262,8 @@ func (a *App) runWallet(ctx context.Context, deadline time.Time, sw *senderWalle
 
 		confirmedNonce, balanceRaw, err := a.getAccountSafe(ctx, sw.Address)
 		if err != nil {
+			a.totalErrors.Add(1)
+			a.readErrors.Add(1)
 			if err := sleepWithContext(ctx, 500*time.Millisecond); err != nil {
 				return err
 			}
@@ -340,6 +349,7 @@ func (a *App) runWallet(ctx context.Context, deadline time.Time, sw *senderWalle
 		if err != nil {
 			a.releaseQuota(batchCount)
 			a.totalErrors.Add(1)
+			a.sendErrors.Add(1)
 			if strings.Contains(strings.ToLower(err.Error()), "lowernonceintx") || strings.Contains(strings.ToLower(err.Error()), "veryhighnonceintx") {
 				networkNonce, _, nErr := a.getAccountSafe(ctx, sw.Address)
 				if nErr == nil && networkNonce > localNonce {
@@ -356,12 +366,42 @@ func (a *App) runWallet(ctx context.Context, deadline time.Time, sw *senderWalle
 		a.totalBatches.Add(1)
 		a.totalSent.Add(uint64(batchCount))
 		a.totalAccepted.Add(uint64(len(hashes)))
+		a.lastBatchAt.Store(time.Now().UnixNano())
 		if hashesCh != nil && len(hashes) > 0 {
 			hashesCh <- hashes
 		}
 		cur := a.totalSent.Load()
 		if cur <= uint64(batchCount) || cur%10000 < uint64(batchCount) {
 			log.Printf("[bulksprint] sent=%d accepted=%d batches=%d", cur, a.totalAccepted.Load(), a.totalBatches.Load())
+		}
+	}
+}
+
+func (a *App) logHeartbeat(ctx context.Context, start time.Time, done <-chan struct{}) {
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-done:
+			return
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			lastBatch := time.Unix(0, a.lastBatchAt.Load())
+			idleFor := time.Since(lastBatch).Round(time.Second)
+			log.Printf(
+				"[bulksprint heartbeat] sent=%d accepted=%d batches=%d errors=%d readErrors=%d sendErrors=%d reserved=%d idleFor=%s elapsed=%s",
+				a.totalSent.Load(),
+				a.totalAccepted.Load(),
+				a.totalBatches.Load(),
+				a.totalErrors.Load(),
+				a.readErrors.Load(),
+				a.sendErrors.Load(),
+				a.reservedTarget.Load(),
+				idleFor,
+				time.Since(start).Round(time.Second),
+			)
 		}
 	}
 }
