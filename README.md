@@ -2,6 +2,9 @@
 
 Clean workspace for the Guild Wars competition on MultiversX.
 
+Current challenge brief:
+- [docs/Supernova-Surge-2026-03-16.md](/C:/Users/portyp/Mvx/KwakBoN/docs/Supernova-Surge-2026-03-16.md)
+
 ## Principles
 
 - Keep this repo shareable with collaborators.
