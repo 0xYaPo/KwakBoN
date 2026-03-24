@@ -4,10 +4,10 @@ Date:
 - `2026-03-16`
 
 Primary references:
-- [Supernova-Surge-2026-03-16.md](/C:/Users/portyp/Mvx/KwakBoN/docs/Supernova-Surge-2026-03-16.md)
-- [Supernova-Runbook.md](/C:/Users/portyp/Mvx/KwakBoN/docs/Supernova-Runbook.md)
-- [Supernova-Balanced-250-Set.md](/C:/Users/portyp/Mvx/KwakBoN/docs/Supernova-Balanced-250-Set.md)
-- [BulkSprint-Benchmarks-2026-03-16.md](/C:/Users/portyp/Mvx/KwakBoN/docs/BulkSprint-Benchmarks-2026-03-16.md)
+- [Supernova-Surge-2026-03-16.md](/C:/Users/y.pochon/Dev/Mvx/KwakBoN/docs/Supernova-Surge-2026-03-16.md)
+- [Supernova-Runbook.md](/C:/Users/y.pochon/Dev/Mvx/KwakBoN/docs/Supernova-Runbook.md)
+- [Supernova-Balanced-250-Set.md](/C:/Users/y.pochon/Dev/Mvx/KwakBoN/docs/Supernova-Balanced-250-Set.md)
+- [BulkSprint-Benchmarks-2026-03-16.md](/C:/Users/y.pochon/Dev/Mvx/KwakBoN/docs/BulkSprint-Benchmarks-2026-03-16.md)
 
 ## Challenge Timing
 
@@ -88,7 +88,7 @@ Funding targets:
 Funding command:
 
 ```powershell
-cd C:\Users\portyp\Mvx\KwakBoN
+cd C:\Users\y.pochon\Dev\Mvx\KwakBoN
 
 $env:WALLETS_MANIFEST='.\configs\wallets-manifest.supernova-balanced-250.json'
 $env:TREASURY_ADDRESS='erd1n28dse0sej7m2rz02ceftr30596arzx2a0trcegl9p3ztdagjahqa9szcx'
@@ -108,7 +108,7 @@ go run ./cmd/fundwallets
 Window B top-up command:
 
 ```powershell
-cd C:\Users\portyp\Mvx\KwakBoN
+cd C:\Users\y.pochon\Dev\Mvx\KwakBoN
 
 $env:WALLETS_MANIFEST='.\configs\wallets-manifest.supernova-balanced-250.json'
 $env:TREASURY_ADDRESS='erd1n28dse0sej7m2rz02ceftr30596arzx2a0trcegl9p3ztdagjahqa9szcx'
@@ -135,14 +135,14 @@ Preferred start:
 Timed bulk launch:
 
 ```powershell
-cd C:\Users\portyp\Mvx\KwakBoN
+cd C:\Users\y.pochon\Dev\Mvx\KwakBoN
 .\run-bulk-at-time.ps1 -LaunchAtUtc "2026-03-16T16:00:00Z" -DurationSeconds 1800
 ```
 
 Immediate bulk launch:
 
 ```powershell
-cd C:\Users\portyp\Mvx\KwakBoN
+cd C:\Users\y.pochon\Dev\Mvx\KwakBoN
 
 $env:WALLETS_MANIFEST='.\configs\wallets-manifest.supernova-balanced-250.json'
 $env:BULK_SENDER_STATUSES='supernova_balanced_active'
@@ -166,7 +166,7 @@ go run ./cmd/bulksprint
 Fallback sprint:
 
 ```powershell
-cd C:\Users\portyp\Mvx\KwakBoN
+cd C:\Users\y.pochon\Dev\Mvx\KwakBoN
 
 $env:WALLETS_MANIFEST='.\configs\wallets-manifest.supernova-balanced-250.json'
 $env:SPRINT_SENDER_STATUSES='supernova_balanced_active'

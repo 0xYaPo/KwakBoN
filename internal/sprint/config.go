@@ -22,6 +22,8 @@ type Config struct {
 	RequiredSenderTags   []string
 	RequiredReceiverTags []string
 	ShardFilter          int
+	RoutingMode          string
+	ReuseSendersAsReceivers bool
 
 	IncludeTreasuryReceiver bool
 	ReceiverWeight          int
@@ -239,6 +241,16 @@ func LoadConfigFromEnv() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	routingMode := strings.ToLower(strings.TrimSpace(getenv("SPRINT_ROUTING_MODE", "same-shard")))
+	switch routingMode {
+	case "same-shard", "cross-shard":
+	default:
+		return Config{}, fmt.Errorf("SPRINT_ROUTING_MODE must be same-shard or cross-shard")
+	}
+	reuseSendersAsReceivers, err := mustBool("SPRINT_REUSE_SENDERS_AS_RECEIVERS", false)
+	if err != nil {
+		return Config{}, err
+	}
 
 	return Config{
 		Network:                getenv("DEFAULT_NETWORK", "battle"),
@@ -252,6 +264,8 @@ func LoadConfigFromEnv() (Config, error) {
 		RequiredSenderTags:     splitCSV(getenv("SPRINT_REQUIRED_SENDER_TAGS", "window_a,sender")),
 		RequiredReceiverTags:   splitCSV(getenv("SPRINT_REQUIRED_RECEIVER_TAGS", "window_a,sink")),
 		ShardFilter:            shardFilter,
+		RoutingMode:            routingMode,
+		ReuseSendersAsReceivers: reuseSendersAsReceivers,
 		IncludeTreasuryReceiver: includeTreasury,
 		ReceiverWeight:         receiverWeight,
 		TreasuryReceiverWeight: treasuryWeight,

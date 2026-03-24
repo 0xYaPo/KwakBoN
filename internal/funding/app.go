@@ -290,8 +290,18 @@ func (a *App) waitAll(ctx context.Context, hashes []string) (int, int, error) {
 	}
 	successes := 0
 	failed := 0
+	start := time.Now()
 
 	for len(pending) > 0 {
+		if a.cfg.ConfirmTimeout > 0 && time.Since(start) >= a.cfg.ConfirmTimeout {
+			return successes, failed, fmt.Errorf(
+				"funding confirmation timeout after %s: pending=%d success=%d failed=%d",
+				a.cfg.ConfirmTimeout,
+				len(pending),
+				successes,
+				failed,
+			)
+		}
 		for h := range pending {
 			status, err := a.gw.GetTxStatus(ctx, h)
 			if err != nil {

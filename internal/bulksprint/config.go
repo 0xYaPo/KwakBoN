@@ -18,6 +18,7 @@ type Config struct {
 	RequiredTags     []string
 	ShardFilter      int
 	MaxActiveWallets int
+	RoutingMode      string
 
 	Duration           time.Duration
 	TargetTx           int
@@ -180,6 +181,12 @@ func LoadConfigFromEnv() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	routingMode := strings.ToLower(strings.TrimSpace(getenv("BULK_ROUTING_MODE", "same-shard")))
+	switch routingMode {
+	case "same-shard", "cross-shard":
+	default:
+		return Config{}, fmt.Errorf("BULK_ROUTING_MODE must be same-shard or cross-shard")
+	}
 
 	return Config{
 		GatewayURL:         getenv("GATEWAY_URL", "https://api.battleofnodes.com"),
@@ -190,6 +197,7 @@ func LoadConfigFromEnv() (Config, error) {
 		RequiredTags:       splitCSV(getenv("BULK_REQUIRED_TAGS", "sender")),
 		ShardFilter:        shardFilter,
 		MaxActiveWallets:   maxWallets,
+		RoutingMode:        routingMode,
 		Duration:           duration,
 		TargetTx:           targetTx,
 		BatchSize:          batchSize,

@@ -24,9 +24,11 @@ type Options struct {
 
 type senderWallet struct {
 	*wallets.Wallet
-	Shard    int
-	Receiver string
-	Name     string
+	Shard        int
+	Receiver     string
+	ReceiverPool []string
+	receiverIdx  int
+	Name         string
 }
 
 type App struct {
@@ -104,24 +106,24 @@ func New(cfg Config, opt Options) (*App, error) {
 		sort.Slice(group, func(i, j int) bool {
 			return strings.Compare(group[i].Address, group[j].Address) < 0
 		})
-		if len(group) < 2 {
-			return nil, fmt.Errorf("shard %d has only %d sender(s); need at least 2 for ring routing", shard, len(group))
+		if cfg.RoutingMode == "same-shard" && len(group) < 2 {
+			return nil, fmt.Errorf("shard %d has only %d sender(s); need at least 2 for same-shard ring routing", shard, len(group))
 		}
 		if cfg.MaxActiveWallets > 0 && len(senders)+len(group) > cfg.MaxActiveWallets {
 			remaining := cfg.MaxActiveWallets - len(senders)
-			if remaining < 2 {
+			if cfg.RoutingMode == "same-shard" && remaining < 2 {
 				break
 			}
 			group = group[:remaining]
-		}
-		for i := range group {
-			group[i].Receiver = group[(i+1)%len(group)].Address
 		}
 		senders = append(senders, group...)
 	}
 
 	if len(senders) == 0 {
 		return nil, fmt.Errorf("no bulk senders available after max wallet filter")
+	}
+	if err := assignReceivers(senders, cfg.RoutingMode); err != nil {
+		return nil, err
 	}
 
 	return &App{
@@ -135,7 +137,7 @@ func New(cfg Config, opt Options) (*App, error) {
 
 func (a *App) Run(ctx context.Context) error {
 	log.Printf(
-		"[bulksprint] gateway=%s senders=%d targetTx=%d duration=%s batchSize=%d lookahead=%d shardFilter=%d value=%s gasLimit=%d gasPrice=%d waitConfirm=%t confirmWorkers=%d confirmTimeout=%s",
+		"[bulksprint] gateway=%s senders=%d targetTx=%d duration=%s batchSize=%d lookahead=%d shardFilter=%d routingMode=%s value=%s gasLimit=%d gasPrice=%d waitConfirm=%t confirmWorkers=%d confirmTimeout=%s",
 		a.cfg.GatewayURL,
 		len(a.senders),
 		a.cfg.TargetTx,
@@ -143,6 +145,7 @@ func (a *App) Run(ctx context.Context) error {
 		a.cfg.BatchSize,
 		a.cfg.MaxNonceLookahead,
 		a.cfg.ShardFilter,
+		a.cfg.RoutingMode,
 		a.cfg.Value,
 		a.cfg.GasLimit,
 		a.cfg.GasPrice,
@@ -153,7 +156,16 @@ func (a *App) Run(ctx context.Context) error {
 
 	if a.opt.DryRun {
 		for i := 0; i < min(5, len(a.senders)); i++ {
-			log.Printf("[bulk dry-run %d] sender=%s shard=%d receiver=%s value=%s batchSize=%d", i+1, a.senders[i].Address, a.senders[i].Shard, a.senders[i].Receiver, a.cfg.Value, a.cfg.BatchSize)
+			log.Printf(
+				"[bulk dry-run %d] sender=%s shard=%d receiver=%s receiverPool=%d value=%s batchSize=%d",
+				i+1,
+				a.senders[i].Address,
+				a.senders[i].Shard,
+				a.senders[i].Receiver,
+				len(a.senders[i].ReceiverPool),
+				a.cfg.Value,
+				a.cfg.BatchSize,
+			)
 		}
 		return nil
 	}
@@ -241,6 +253,60 @@ func (a *App) Run(ctx context.Context) error {
 	return nil
 }
 
+func assignReceivers(senders []senderWallet, routingMode string) error {
+	grouped := make(map[int][]int)
+	shards := make([]int, 0)
+	for i := range senders {
+		if _, ok := grouped[senders[i].Shard]; !ok {
+			shards = append(shards, senders[i].Shard)
+		}
+		grouped[senders[i].Shard] = append(grouped[senders[i].Shard], i)
+	}
+	sort.Ints(shards)
+
+	switch routingMode {
+	case "same-shard":
+		for _, shard := range shards {
+			indices := grouped[shard]
+			if len(indices) < 2 {
+				return fmt.Errorf("shard %d has only %d sender(s); need at least 2 for same-shard ring routing", shard, len(indices))
+			}
+			for pos, idx := range indices {
+				nextIdx := indices[(pos+1)%len(indices)]
+				senders[idx].Receiver = senders[nextIdx].Address
+				senders[idx].ReceiverPool = []string{senders[nextIdx].Address}
+				senders[idx].receiverIdx = 0
+			}
+		}
+		return nil
+	case "cross-shard":
+		if len(shards) < 2 {
+			return fmt.Errorf("cross-shard routing requires senders in at least 2 shards")
+		}
+		for shardPos, shard := range shards {
+			targetShard := shards[(shardPos+1)%len(shards)]
+			targetIndices := grouped[targetShard]
+			if len(targetIndices) == 0 {
+				return fmt.Errorf("no cross-shard receiver pool available for sender shard %d", shard)
+			}
+			targetPool := make([]string, 0, len(targetIndices))
+			for _, targetIdx := range targetIndices {
+				targetPool = append(targetPool, senders[targetIdx].Address)
+			}
+			sourceIndices := grouped[shard]
+			for pos, idx := range sourceIndices {
+				rotatedPool := rotateStrings(targetPool, pos%len(targetPool))
+				senders[idx].Receiver = rotatedPool[0]
+				senders[idx].ReceiverPool = rotatedPool
+				senders[idx].receiverIdx = 0
+			}
+		}
+		return nil
+	default:
+		return fmt.Errorf("unsupported routing mode %q", routingMode)
+	}
+}
+
 func (a *App) runWallet(ctx context.Context, deadline time.Time, sw *senderWallet, hashesCh chan<- []string) error {
 	var localNonce uint64
 	nonceInitialized := false
@@ -311,10 +377,11 @@ func (a *App) runWallet(ctx context.Context, deadline time.Time, sw *senderWalle
 
 		txs := make([]gateway.TxSendRequest, 0, batchCount)
 		for j := 0; j < batchCount; j++ {
+			receiver := sw.nextReceiver()
 			tx := gateway.TxSendRequest{
 				Nonce:    localNonce + uint64(j),
 				Value:    a.cfg.Value,
-				Receiver: sw.Receiver,
+				Receiver: receiver,
 				Sender:   sw.Address,
 				GasPrice: a.cfg.GasPrice,
 				GasLimit: a.cfg.GasLimit,
@@ -441,6 +508,32 @@ func firstNonEmpty(items ...string) string {
 		}
 	}
 	return ""
+}
+
+func rotateStrings(in []string, offset int) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	if offset <= 0 {
+		out := make([]string, len(in))
+		copy(out, in)
+		return out
+	}
+	offset = offset % len(in)
+	out := make([]string, 0, len(in))
+	out = append(out, in[offset:]...)
+	out = append(out, in[:offset]...)
+	return out
+}
+
+func (sw *senderWallet) nextReceiver() string {
+	if len(sw.ReceiverPool) == 0 {
+		return sw.Receiver
+	}
+	receiver := sw.ReceiverPool[sw.receiverIdx%len(sw.ReceiverPool)]
+	sw.receiverIdx++
+	sw.Receiver = receiver
+	return receiver
 }
 
 func min(a, b int) int {

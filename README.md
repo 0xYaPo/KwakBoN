@@ -3,11 +3,8 @@
 Clean workspace for the Guild Wars competition on MultiversX.
 
 Current challenge brief:
-- [docs/Supernova-Surge-2026-03-16.md](/C:/Users/portyp/Mvx/KwakBoN/docs/Supernova-Surge-2026-03-16.md)
-- [docs/Supernova-Runbook.md](/C:/Users/portyp/Mvx/KwakBoN/docs/Supernova-Runbook.md)
-- [docs/Supernova-Day-Of-Checklist.md](/C:/Users/portyp/Mvx/KwakBoN/docs/Supernova-Day-Of-Checklist.md)
-- [docs/Supernova-Balanced-250-Set.md](/C:/Users/portyp/Mvx/KwakBoN/docs/Supernova-Balanced-250-Set.md)
-- [docs/BulkSprint-Benchmarks-2026-03-16.md](/C:/Users/portyp/Mvx/KwakBoN/docs/BulkSprint-Benchmarks-2026-03-16.md)
+- [docs/challenge3.md](/C:/Users/y.pochon/Dev/Mvx/KwakBoN/docs/challenge3.md)
+- [docs/Challenge3-Prep-Plan.md](/C:/Users/y.pochon/Dev/Mvx/KwakBoN/docs/Challenge3-Prep-Plan.md)
 
 ## Principles
 
@@ -32,22 +29,24 @@ Current challenge brief:
 
 ## Reusable core included
 
-- [internal/gateway/client.go](/C:/Users/portyp/Mvx/KwakBoN/internal/gateway/client.go) for nonce, balance, shard, status, and tx broadcast calls
-- [internal/wallets/wallets.go](/C:/Users/portyp/Mvx/KwakBoN/internal/wallets/wallets.go) and [internal/wallets/pem_signer.go](/C:/Users/portyp/Mvx/KwakBoN/internal/wallets/pem_signer.go) for local wallet loading and PEM signing
-- [internal/txsign/txsign.go](/C:/Users/portyp/Mvx/KwakBoN/internal/txsign/txsign.go) for canonical MultiversX tx signing payloads
-- [internal/ratelimit/tps.go](/C:/Users/portyp/Mvx/KwakBoN/internal/ratelimit/tps.go) for simple TPS control
-- [internal/esdt/esdt.go](/C:/Users/portyp/Mvx/KwakBoN/internal/esdt/esdt.go) for token amount and payload helpers
+- [internal/gateway/client.go](/C:/Users/y.pochon/Dev/Mvx/KwakBoN/internal/gateway/client.go) for nonce, balance, shard, status, and tx broadcast calls
+- [internal/wallets/wallets.go](/C:/Users/y.pochon/Dev/Mvx/KwakBoN/internal/wallets/wallets.go) and [internal/wallets/pem_signer.go](/C:/Users/y.pochon/Dev/Mvx/KwakBoN/internal/wallets/pem_signer.go) for local wallet loading and PEM signing
+- [internal/txsign/txsign.go](/C:/Users/y.pochon/Dev/Mvx/KwakBoN/internal/txsign/txsign.go) for canonical MultiversX tx signing payloads
+- [internal/ratelimit/tps.go](/C:/Users/y.pochon/Dev/Mvx/KwakBoN/internal/ratelimit/tps.go) for simple TPS control
+- [internal/esdt/esdt.go](/C:/Users/y.pochon/Dev/Mvx/KwakBoN/internal/esdt/esdt.go) for token amount and payload helpers
 
 These are generic enough to reuse across Guild Wars tools without pulling in old challenge runners.
 
 ## Wallet Manifest
 
-- Single source of truth: `configs/wallets-manifest.json`
-- Example file: [configs/wallets-manifest.example.json](/C:/Users/portyp/Mvx/KwakBoN/configs/wallets-manifest.example.json)
+- Generic example file: [configs/wallets-manifest.example.json](/C:/Users/y.pochon/Dev/Mvx/KwakBoN/configs/wallets-manifest.example.json)
+- Challenge 3 live files:
+  - `configs/wallets-manifest.challenge3-part1.live.json`
+  - `configs/wallets-manifest.challenge3-part2.live.json`
 - Validation/summary command:
 
 ```bash
-go run ./cmd/walletmanifest -manifest ./configs/wallets-manifest.json
+go run ./cmd/walletmanifest -manifest ./configs/wallets-manifest.challenge3-part1.live.json
 ```
 
 - Expected fields per wallet:
@@ -61,26 +60,28 @@ go run ./cmd/walletmanifest -manifest ./configs/wallets-manifest.json
   - `enabled`
   - `notes`
 
-## Wallet Generation
+## Challenge 3 Live Workflow
 
-Generate wallets until the manifest reaches the desired totals and shard-2 quota:
+Challenge 3 only counts cross-shard `MoveBalance` transactions.
 
-```bash
-go run ./cmd/genwallets \
-  -manifest ./configs/wallets-manifest.json \
-  -wallets-dir ./wallets \
-  -target-total 497 \
-  -target-shard2 250 \
-  -active-shard2 150 \
-  -reserve-shard2 100
-```
+Live wallet generation helpers:
+- [run-gen-challenge3-part1-live.ps1](/C:/Users/y.pochon/Dev/Mvx/KwakBoN/run-gen-challenge3-part1-live.ps1)
+- [run-gen-challenge3-part2-live.ps1](/C:/Users/y.pochon/Dev/Mvx/KwakBoN/run-gen-challenge3-part2-live.ps1)
 
-This command:
-- creates PEM files in `./wallets`
-- derives wallet address and shard locally
-- appends new entries to the manifest
-- marks shard-2 wallets as `active_candidate` then `warm_reserve`
-- marks other wallets as `window_b_reserve`
+These generate fresh `500`-wallet sets with balanced shard targets:
+- shard `0`: `166`
+- shard `1`: `167`
+- shard `2`: `167`
+
+Part 1 live assets:
+- manifest: `configs/wallets-manifest.challenge3-part1.live.json`
+- wallet dir: `wallets/challenge3-part1-live`
+
+Part 2 live assets:
+- manifest: `configs/wallets-manifest.challenge3-part2.live.json`
+- wallet dir: `wallets/challenge3-part2-live`
+
+Do not reuse rehearsal manifests or wallet directories during the live challenge.
 
 ## Funding
 
@@ -109,8 +110,15 @@ Key environment variables:
 - `FUND_NONCE_RETRY_COOLDOWN_MS`
 - `FUND_NONCE_RESYNC_ATTEMPTS`
 
-Helper script:
-- [run-fund-window-a.ps1](/C:/Users/portyp/Mvx/KwakBoN/run-fund-window-a.ps1)
+Challenge 3 funding helpers:
+- [run-fund-challenge3.ps1](/C:/Users/y.pochon/Dev/Mvx/KwakBoN/run-fund-challenge3.ps1)
+- [run-fund-challenge3-part2.ps1](/C:/Users/y.pochon/Dev/Mvx/KwakBoN/run-fund-challenge3-part2.ps1)
+
+Current live defaults:
+- Part 1: `4.0 EGLD` per wallet
+- Part 2: `1.0 EGLD` per wallet
+- funding uses direct GL -> sender wallet transfers only
+- funding confirmation polling is bounded by timeout
 
 ## Sweep Back
 
@@ -129,8 +137,10 @@ Key environment variables:
 - `SWEEP_SHARD_FILTER`
 - `SWEEP_MIN_REMAIN_EGLD`
 
-Helper script:
-- [run-sweep-window-a.ps1](/C:/Users/portyp/Mvx/KwakBoN/run-sweep-window-a.ps1)
+Challenge 3 sweep helper:
+- [run-sweep-challenge3-part2.ps1](/C:/Users/y.pochon/Dev/Mvx/KwakBoN/run-sweep-challenge3-part2.ps1)
+
+Sweep confirmation polling now uses concurrent status workers and bounded timeouts.
 
 ## Sender
 
@@ -142,7 +152,8 @@ go run ./cmd/windowsprint --dry-run
 
 Current sender behavior:
 - sender selection comes from manifest status/tag filters
-- receiver routing is shard-aware: a sender only picks receivers from its own shard
+- routing supports both same-shard and cross-shard modes
+- `SPRINT_REUSE_SENDERS_AS_RECEIVERS=true` allows sender-set reuse as receiver pool
 - per-wallet inflight limit and cooldowns reduce nonce drift under congestion
 - transient gateway errors do not immediately kill the run
 
@@ -166,8 +177,9 @@ Key environment variables:
 - `CONTINUE_ON_TRANSIENT_SEND_ERROR`
 - `CONFIRM_SUCCESS_TARGET`
 
-Helper script:
-- [run-window-a.ps1](/C:/Users/portyp/Mvx/KwakBoN/run-window-a.ps1)
+Challenge 3 sprint helpers:
+- [run-sprint-challenge3.ps1](/C:/Users/y.pochon/Dev/Mvx/KwakBoN/run-sprint-challenge3.ps1)
+- [run-sprint-challenge3-part2.ps1](/C:/Users/y.pochon/Dev/Mvx/KwakBoN/run-sprint-challenge3-part2.ps1)
 
 ## Bulk Sender
 
@@ -178,12 +190,13 @@ go run ./cmd/bulksprint --dry-run
 ```
 
 Current bulk sender behavior:
-- same-shard only ring routing built directly from the selected sender set
+- supports `BULK_ROUTING_MODE=same-shard|cross-shard`
 - one worker per active wallet
 - one nonce+balance read per batch
 - bounded nonce lookahead per wallet
 - bulk broadcast through the gateway `send-multiple` path
 - optional lightweight confirmation polling for aggregate finality checks
+- cross-shard mode now uses receiver-pool rotation within the target shard instead of fixed one-to-one pairings
 
 Key environment variables:
 - `WALLETS_MANIFEST`
@@ -205,38 +218,29 @@ Key environment variables:
 
 This mode is meant for throughput benchmarking on the shared API path. It is intentionally narrower and less defensive than `windowsprint`.
 
-Current validated bulk profile:
-- `BULK_BATCH_SIZE=25`
-- `BULK_MAX_NONCE_LOOKAHEAD=50`
-- `BULK_MAX_CONCURRENT_READS=24`
+Challenge 3 validated profiles:
 
-Earlier benchmark results:
-- `20,000 tx`: send phase about `4s`, `20,000/20,000 success`
-- `50,000 tx`: send phase about `13s`, `49,958/50,000 success` after `4m`, `42 pending`, `0 failed`
+Part 1:
+- live full-set probe, `500` wallets, cross-shard, `25/50`, min value:
+  - `1,042,100` accepted in `10` minutes
 
-Live Supernova results with the balanced `250` wallet set:
-- fixed target `100,000 tx`: `100,000/100,000 accepted` in about `32.7s`
-- duration `10 min`: `1,747,130 sent`, `1,746,002 accepted`, `15 errors`
+Part 2:
+- full-set rehearsal, `500` wallets, `0.75 EGLD` funding, cross-shard receiver-pool routing, `12/15`:
+  - `1,286,553` accepted in `10` minutes
+- aggressive burst probe, `25/50`:
+  - `149,913` accepted in `3m56s`
+  - too unstable as a sustained 30-minute profile
 
 Current interpretation:
-- `bulksprint` is now a serious primary candidate on live Supernova
-- `windowsprint` remains the fallback sender and simpler operator path
+- `bulksprint` is the primary Challenge 3 sender
+- `windowsprint` remains the fallback path
+- Part 1 favors aggressive throughput
+- Part 2 requires more care because each tx carries `0.01 EGLD`
+- receiver-pool rotation materially improved Part 2 balance drift
 
-Detailed notes:
-- [docs/BulkSprint-Benchmarks-2026-03-16.md](/C:/Users/portyp/Mvx/KwakBoN/docs/BulkSprint-Benchmarks-2026-03-16.md)
-- [docs/BulkSprint-Roadmap.md](/C:/Users/portyp/Mvx/KwakBoN/docs/BulkSprint-Roadmap.md)
-
-## Validated Test Profiles
-
-Observed on `prepSupernova`:
-- Window A profile: `250` senders, shard `2`, same-shard receivers, `750 TPS`, `192` workers, `20,000/20,000 success`
-- Window A upper-bound probe: `250` senders, `1500 TPS`, `20,000/20,000 success`
-- Window B profile: `497` senders, all shards, shard-aware receivers, `700 TPS`, `192` workers, `20,000/20,000 success`
-- Funding retry/resume for large treasury batches completed successfully after hardening
-
-Observed on live Supernova:
-- balanced `windowsprint`, `250` senders, `10 min`, `1200 TPS` target: `324,160 sent`
-- balanced `bulksprint`, `250` senders, `10 min`, tuned `25/50` profile: `1,746,002 accepted`
+Challenge 3 bulk helpers:
+- [run-bulk-challenge3.ps1](/C:/Users/y.pochon/Dev/Mvx/KwakBoN/run-bulk-challenge3.ps1)
+- [run-bulk-challenge3-part2.ps1](/C:/Users/y.pochon/Dev/Mvx/KwakBoN/run-bulk-challenge3-part2.ps1)
 
 ## Local setup
 

@@ -123,10 +123,20 @@ func New(cfg Config, opt Options) (*App, error) {
 	if len(senders) == 0 {
 		return nil, fmt.Errorf("no senders matched manifest filters")
 	}
+	if cfg.ReuseSendersAsReceivers {
+		for _, sender := range senders {
+			for i := 0; i < max(1, cfg.ReceiverWeight); i++ {
+				receivers = append(receivers, receiverTarget{
+					Address: sender.Address,
+					Shard:   sender.Shard,
+				})
+			}
+		}
+	}
 	if len(receivers) == 0 {
 		return nil, fmt.Errorf("no receivers matched manifest filters")
 	}
-	if err := validateShardCoverage(senders, receivers); err != nil {
+	if err := validateShardCoverage(senders, receivers, cfg.RoutingMode); err != nil {
 		return nil, err
 	}
 
@@ -164,7 +174,7 @@ func (a *App) Run(ctx context.Context) error {
 	}
 
 	log.Printf(
-		"[sprint] network=%s chainID=%s gateway=%s senders=%d receivers=%d targetTx=%d duration=%s tps=%d workers=%d confirmWorkers=%d value=%s gasLimit=%d gasPrice=%d waitConfirm=%t continueOnTransient=%t confirmTarget=%d confirmTimeout=%s shardFilter=%d maxInflightPerWallet=%d successCooldown=%s transientCooldown=%s quarantineCooldown=%s quarantineThreshold=%d",
+		"[sprint] network=%s chainID=%s gateway=%s senders=%d receivers=%d targetTx=%d duration=%s tps=%d workers=%d confirmWorkers=%d value=%s gasLimit=%d gasPrice=%d waitConfirm=%t continueOnTransient=%t confirmTarget=%d confirmTimeout=%s shardFilter=%d routingMode=%s reuseSendersAsReceivers=%t maxInflightPerWallet=%d successCooldown=%s transientCooldown=%s quarantineCooldown=%s quarantineThreshold=%d",
 		a.cfg.Network,
 		a.cfg.ChainID,
 		a.cfg.GatewayURL,
@@ -183,6 +193,8 @@ func (a *App) Run(ctx context.Context) error {
 		a.cfg.ConfirmSuccessTarget,
 		a.cfg.ConfirmTimeout,
 		a.cfg.ShardFilter,
+		a.cfg.RoutingMode,
+		a.cfg.ReuseSendersAsReceivers,
 		a.cfg.MaxInflightPerWallet,
 		a.cfg.SuccessCooldown,
 		a.cfg.TransientCooldown,
@@ -194,7 +206,7 @@ func (a *App) Run(ctx context.Context) error {
 		for i := 0; i < min(5, len(a.senders)); i++ {
 			receiver, ok := a.pickReceiver(a.senders[i].Shard, i)
 			if !ok {
-				return fmt.Errorf("no receiver available for sender shard %d", a.senders[i].Shard)
+				return fmt.Errorf("no receiver available for sender shard %d in %s mode", a.senders[i].Shard, a.cfg.RoutingMode)
 			}
 			log.Printf("[dry-run %d] sender=%s shard=%d receiver=%s receiverShard=%d value=%s", i+1, a.senders[i].Address, a.senders[i].Shard, receiver.Address, receiver.Shard, a.cfg.Value)
 		}
@@ -263,7 +275,7 @@ func (a *App) Run(ctx context.Context) error {
 				if !ok {
 					a.releaseQuota(1)
 					sender.release()
-					pushErr(fmt.Errorf("no receiver available for sender shard %d", sender.Shard))
+					pushErr(fmt.Errorf("no receiver available for sender shard %d in %s mode", sender.Shard, a.cfg.RoutingMode))
 					return
 				}
 
@@ -543,7 +555,7 @@ func findWalletShard(mf *manifest.Manifest, address string) (int, bool) {
 	return 0, false
 }
 
-func validateShardCoverage(senders []senderWallet, receivers []receiverTarget) error {
+func validateShardCoverage(senders []senderWallet, receivers []receiverTarget, routingMode string) error {
 	receiverShards := make(map[int]struct{}, len(receivers))
 	for _, receiver := range receivers {
 		receiverShards[receiver.Shard] = struct{}{}
@@ -553,8 +565,24 @@ func validateShardCoverage(senders []senderWallet, receivers []receiverTarget) e
 		senderShards[sender.Shard] = struct{}{}
 	}
 	for shard := range senderShards {
-		if _, ok := receiverShards[shard]; !ok {
-			return fmt.Errorf("no receiver available for sender shard %d", shard)
+		switch routingMode {
+		case "same-shard":
+			if _, ok := receiverShards[shard]; !ok {
+				return fmt.Errorf("no same-shard receiver available for sender shard %d", shard)
+			}
+		case "cross-shard":
+			found := false
+			for receiverShard := range receiverShards {
+				if receiverShard != shard {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return fmt.Errorf("no cross-shard receiver available for sender shard %d", shard)
+			}
+		default:
+			return fmt.Errorf("unsupported routing mode %q", routingMode)
 		}
 	}
 	return nil
@@ -564,11 +592,22 @@ func (a *App) pickReceiver(senderShard int, start int) (receiverTarget, bool) {
 	for i := 0; i < len(a.receivers); i++ {
 		idx := (start + i) % len(a.receivers)
 		receiver := a.receivers[idx]
-		if receiver.Shard == senderShard {
+		if a.isValidReceiverShard(senderShard, receiver.Shard) {
 			return receiver, true
 		}
 	}
 	return receiverTarget{}, false
+}
+
+func (a *App) isValidReceiverShard(senderShard int, receiverShard int) bool {
+	switch a.cfg.RoutingMode {
+	case "same-shard":
+		return receiverShard == senderShard
+	case "cross-shard":
+		return receiverShard != senderShard
+	default:
+		return false
+	}
 }
 
 func sleepWithContext(ctx context.Context, d time.Duration) error {

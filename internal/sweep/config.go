@@ -15,7 +15,9 @@ type Config struct {
 	GasPrice        uint64
 	GasLimit        uint64
 	WaitConfirm     bool
+	ConfirmWorkers  int
 	PollInterval    time.Duration
+	ConfirmTimeout  time.Duration
 	HTTPTimeout     time.Duration
 	ManifestPath    string
 	TreasuryAddress string
@@ -111,7 +113,18 @@ func LoadConfigFromEnv() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	confirmWorkers, err := mustInt("SWEEP_CONFIRM_WORKERS", 32)
+	if err != nil {
+		return Config{}, err
+	}
+	if confirmWorkers <= 0 {
+		return Config{}, fmt.Errorf("SWEEP_CONFIRM_WORKERS must be > 0")
+	}
 	poll, err := mustDurationSeconds("POLL_INTERVAL_SECONDS", 3)
+	if err != nil {
+		return Config{}, err
+	}
+	confirmTimeout, err := mustDurationSeconds("SWEEP_CONFIRM_TIMEOUT_SECONDS", 0)
 	if err != nil {
 		return Config{}, err
 	}
@@ -131,7 +144,9 @@ func LoadConfigFromEnv() (Config, error) {
 		GasPrice:        gasPrice,
 		GasLimit:        gasLimit,
 		WaitConfirm:     waitConfirm,
+		ConfirmWorkers:  confirmWorkers,
 		PollInterval:    poll,
+		ConfirmTimeout:  confirmTimeout,
 		HTTPTimeout:     httpTO,
 		ManifestPath:    getenv("WALLETS_MANIFEST", "./configs/wallets-manifest.json"),
 		TreasuryAddress: getenv("TREASURY_ADDRESS", ""),

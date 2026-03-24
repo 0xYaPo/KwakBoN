@@ -8,6 +8,8 @@ import (
 	"math/big"
 	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"kwakbon/internal/esdt"
@@ -301,23 +303,96 @@ func (a *App) waitAll(ctx context.Context, hashes []string) (int, int, error) {
 	}
 	successes := 0
 	failed := 0
+	start := time.Now()
 
 	for len(pending) > 0 {
-		for h := range pending {
-			status, err := a.gw.GetTxStatus(ctx, h)
-			if err != nil {
-				continue
-			}
-			if gateway.IsFinalSuccessStatus(status) {
-				successes++
-				delete(pending, h)
-				continue
-			}
-			if gateway.IsFinalFailureStatus(status) {
-				failed++
-				delete(pending, h)
-			}
+		if a.cfg.ConfirmTimeout > 0 && time.Since(start) >= a.cfg.ConfirmTimeout {
+			return successes, failed, fmt.Errorf(
+				"sweep confirmation timeout after %s: pending=%d success=%d failed=%d samplePending=%s",
+				a.cfg.ConfirmTimeout,
+				len(pending),
+				successes,
+				failed,
+				strings.Join(samplePendingHashes(pending, 5), ","),
+			)
 		}
+
+		resolvedMu := sync.Mutex{}
+		resolvedSuccess := make([]string, 0, len(pending))
+		resolvedFailed := make([]string, 0, len(pending))
+		checked := atomic.Int64{}
+		deltaSuccess := atomic.Int64{}
+		deltaFailed := atomic.Int64{}
+		roundTotal := len(pending)
+
+		jobs := make(chan string)
+		var wg sync.WaitGroup
+		progressDone := make(chan struct{})
+		go func(total int) {
+			ticker := time.NewTicker(10 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-progressDone:
+					return
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					log.Printf(
+						"[sweepwallets confirm progress] checked=%d/%d resolved=%d successDelta=%d failedDelta=%d",
+						checked.Load(),
+						total,
+						deltaSuccess.Load()+deltaFailed.Load(),
+						deltaSuccess.Load(),
+						deltaFailed.Load(),
+					)
+				}
+			}
+		}(roundTotal)
+
+		for i := 0; i < a.cfg.ConfirmWorkers; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for h := range jobs {
+					status, err := a.gw.GetTxStatus(ctx, h)
+					checked.Add(1)
+					if err != nil {
+						continue
+					}
+					if gateway.IsFinalSuccessStatus(status) {
+						deltaSuccess.Add(1)
+						resolvedMu.Lock()
+						resolvedSuccess = append(resolvedSuccess, h)
+						resolvedMu.Unlock()
+						continue
+					}
+					if gateway.IsFinalFailureStatus(status) {
+						deltaFailed.Add(1)
+						resolvedMu.Lock()
+						resolvedFailed = append(resolvedFailed, h)
+						resolvedMu.Unlock()
+					}
+				}
+			}()
+		}
+
+		for h := range pending {
+			jobs <- h
+		}
+		close(jobs)
+		wg.Wait()
+		close(progressDone)
+
+		for _, h := range resolvedSuccess {
+			delete(pending, h)
+		}
+		for _, h := range resolvedFailed {
+			delete(pending, h)
+		}
+		successes += len(resolvedSuccess)
+		failed += len(resolvedFailed)
+
 		log.Printf("[sweepwallets confirm] pending=%d success=%d failed=%d", len(pending), successes, failed)
 		if len(pending) == 0 {
 			break
@@ -330,6 +405,21 @@ func (a *App) waitAll(ctx context.Context, hashes []string) (int, int, error) {
 	}
 
 	return successes, failed, nil
+}
+
+func samplePendingHashes(pending map[string]struct{}, limit int) []string {
+	if limit <= 0 || len(pending) == 0 {
+		return nil
+	}
+	hashes := make([]string, 0, len(pending))
+	for h := range pending {
+		hashes = append(hashes, h)
+	}
+	sort.Strings(hashes)
+	if len(hashes) > limit {
+		hashes = hashes[:limit]
+	}
+	return hashes
 }
 
 func containsFold(items []string, want string) bool {

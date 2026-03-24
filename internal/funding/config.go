@@ -16,6 +16,7 @@ type Config struct {
 	GasLimit        uint64
 	WaitConfirm     bool
 	PollInterval    time.Duration
+	ConfirmTimeout  time.Duration
 	HTTPTimeout     time.Duration
 	ManifestPath    string
 	TreasuryAddress string
@@ -129,6 +130,10 @@ func LoadConfigFromEnv() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	confirmTimeout, err := mustDurationSeconds("FUND_CONFIRM_TIMEOUT_SECONDS", 0)
+	if err != nil {
+		return Config{}, err
+	}
 	httpTO, err := mustDurationSeconds("HTTP_TIMEOUT_SECONDS", 12)
 	if err != nil {
 		return Config{}, err
@@ -165,6 +170,8 @@ func LoadConfigFromEnv() (Config, error) {
 		"warm_reserve":              getenv("FUND_TARGET_RESERVE_EGLD", "0.2"),
 		"window_b_reserve":          getenv("FUND_TARGET_WINDOW_B_RESERVE_EGLD", "0.2"),
 		"supernova_balanced_active": getenv("FUND_TARGET_SUPERNOVA_BALANCED_ACTIVE_EGLD", getenv("FUND_TARGET_ACTIVE_EGLD", "0.6")),
+		"challenge3_part1_sender":   getenv("FUND_TARGET_CHALLENGE3_PART1_EGLD", getenv("FUND_TARGET_ACTIVE_EGLD", "0.6")),
+		"challenge3_part2_sender":   getenv("FUND_TARGET_CHALLENGE3_PART2_EGLD", getenv("FUND_TARGET_ACTIVE_EGLD", "0.6")),
 	}
 
 	cfg := Config{
@@ -175,6 +182,7 @@ func LoadConfigFromEnv() (Config, error) {
 		GasLimit:        gasLimit,
 		WaitConfirm:     waitConfirm,
 		PollInterval:    poll,
+		ConfirmTimeout:  confirmTimeout,
 		HTTPTimeout:     httpTO,
 		ManifestPath:    getenv("WALLETS_MANIFEST", "./configs/wallets-manifest.json"),
 		TreasuryAddress: getenv("TREASURY_ADDRESS", ""),

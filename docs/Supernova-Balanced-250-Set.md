@@ -5,10 +5,10 @@ Purpose:
 - compare a balanced cross-shard run against the previous shard-2-heavy runs
 
 Source manifest:
-- [wallets-manifest.json](/C:/Users/portyp/Mvx/KwakBoN/configs/wallets-manifest.json)
+- [wallets-manifest.json](/C:/Users/y.pochon/Dev/Mvx/KwakBoN/configs/wallets-manifest.json)
 
 Derived manifest for direct use:
-- [wallets-manifest.supernova-balanced-250.json](/C:/Users/portyp/Mvx/KwakBoN/configs/wallets-manifest.supernova-balanced-250.json)
+- [wallets-manifest.supernova-balanced-250.json](/C:/Users/y.pochon/Dev/Mvx/KwakBoN/configs/wallets-manifest.supernova-balanced-250.json)
 
 ## Target Composition
 
