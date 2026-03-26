@@ -172,6 +172,8 @@ func LoadConfigFromEnv() (Config, error) {
 		"supernova_balanced_active": getenv("FUND_TARGET_SUPERNOVA_BALANCED_ACTIVE_EGLD", getenv("FUND_TARGET_ACTIVE_EGLD", "0.6")),
 		"challenge3_part1_sender":   getenv("FUND_TARGET_CHALLENGE3_PART1_EGLD", getenv("FUND_TARGET_ACTIVE_EGLD", "0.6")),
 		"challenge3_part2_sender":   getenv("FUND_TARGET_CHALLENGE3_PART2_EGLD", getenv("FUND_TARGET_ACTIVE_EGLD", "0.6")),
+		"challenge4_operator":       getenv("FUND_TARGET_CHALLENGE4_OPERATOR_EGLD", getenv("FUND_TARGET_ACTIVE_EGLD", "0.6")),
+		"challenge4_caller":         getenv("FUND_TARGET_CHALLENGE4_CALLER_EGLD", getenv("FUND_TARGET_ACTIVE_EGLD", "0.6")),
 	}
 
 	cfg := Config{

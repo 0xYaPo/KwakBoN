@@ -3,8 +3,44 @@
 Clean workspace for the Guild Wars competition on MultiversX.
 
 Current challenge brief:
-- [docs/challenge3.md](/C:/Users/y.pochon/Dev/Mvx/KwakBoN/docs/challenge3.md)
-- [docs/Challenge3-Prep-Plan.md](/C:/Users/y.pochon/Dev/Mvx/KwakBoN/docs/Challenge3-Prep-Plan.md)
+- [docs/challenge3.md](docs/challenge3.md)
+- [docs/Challenge3-Prep-Plan.md](docs/Challenge3-Prep-Plan.md)
+- [docs/Challenge4.md](docs/Challenge4.md)
+- [docs/Challenge4details.md](docs/Challenge4details.md)
+- [docs/Challenge4-Prep-Plan.md](docs/Challenge4-Prep-Plan.md)
+- [docs/Challenge4-Operator-Checklist.md](docs/Challenge4-Operator-Checklist.md)
+
+Challenge 4 live command flow is now documented in one place:
+- reset
+- integrated prep
+- spot checks
+- sustained launch
+- final drains
+- see [docs/Challenge4-Operator-Checklist.md](docs/Challenge4-Operator-Checklist.md)
+
+Challenge 4 summary:
+- confirmed pair:
+  - `erd1qqqqqqqqqqqqqpgqeel2kumf0r8ffyhth7pqdujjat9nx0862jpsg2pqa`
+- sanctioned deploy artifact used
+- validated working lanes:
+  - shard `1` `blindSync`
+  - shard `0` `blindAsyncV1`
+  - shard `2` `blindAsyncV2`
+  - shard `1` `blindTransfExec` via `swap1` and `swap2`
+- validated live inventory model:
+  - callers funded to `0.5 EGLD`
+  - operators funded to `5 EGLD`
+  - `swap2` default reduced to `10000`
+  - `swap2` pool seeded with `3000000` base `USDC` per wallet
+- verified real run outcome from API history:
+  - `blindSync`: `869`
+  - `blindAsyncV1`: `1426`
+  - `blindAsyncV2`: `1429`
+  - `blindTransfExec`: `315`
+  - total successful calls: `4039`
+- practical caveat:
+  - the tx retrieval / confirmation path on the BoN API is flaky enough to stall or kill the current sustained runner
+  - simple batches still produce successful on-chain calls, but long-run orchestration is not fully reliable yet
 
 ## Principles
 
@@ -29,17 +65,17 @@ Current challenge brief:
 
 ## Reusable core included
 
-- [internal/gateway/client.go](/C:/Users/y.pochon/Dev/Mvx/KwakBoN/internal/gateway/client.go) for nonce, balance, shard, status, and tx broadcast calls
-- [internal/wallets/wallets.go](/C:/Users/y.pochon/Dev/Mvx/KwakBoN/internal/wallets/wallets.go) and [internal/wallets/pem_signer.go](/C:/Users/y.pochon/Dev/Mvx/KwakBoN/internal/wallets/pem_signer.go) for local wallet loading and PEM signing
-- [internal/txsign/txsign.go](/C:/Users/y.pochon/Dev/Mvx/KwakBoN/internal/txsign/txsign.go) for canonical MultiversX tx signing payloads
-- [internal/ratelimit/tps.go](/C:/Users/y.pochon/Dev/Mvx/KwakBoN/internal/ratelimit/tps.go) for simple TPS control
-- [internal/esdt/esdt.go](/C:/Users/y.pochon/Dev/Mvx/KwakBoN/internal/esdt/esdt.go) for token amount and payload helpers
+- [internal/gateway/client.go](internal/gateway/client.go) for nonce, balance, shard, status, and tx broadcast calls
+- [internal/wallets/wallets.go](internal/wallets/wallets.go) and [internal/wallets/pem_signer.go](internal/wallets/pem_signer.go) for local wallet loading and PEM signing
+- [internal/txsign/txsign.go](internal/txsign/txsign.go) for canonical MultiversX tx signing payloads
+- [internal/ratelimit/tps.go](internal/ratelimit/tps.go) for simple TPS control
+- [internal/esdt/esdt.go](internal/esdt/esdt.go) for token amount and payload helpers
 
 These are generic enough to reuse across Guild Wars tools without pulling in old challenge runners.
 
 ## Wallet Manifest
 
-- Generic example file: [configs/wallets-manifest.example.json](/C:/Users/y.pochon/Dev/Mvx/KwakBoN/configs/wallets-manifest.example.json)
+- Generic example file: [configs/wallets-manifest.example.json](configs/wallets-manifest.example.json)
 - Challenge 3 live files:
   - `configs/wallets-manifest.challenge3-part1.live.json`
   - `configs/wallets-manifest.challenge3-part2.live.json`
@@ -65,8 +101,8 @@ go run ./cmd/walletmanifest -manifest ./configs/wallets-manifest.challenge3-part
 Challenge 3 only counts cross-shard `MoveBalance` transactions.
 
 Live wallet generation helpers:
-- [run-gen-challenge3-part1-live.ps1](/C:/Users/y.pochon/Dev/Mvx/KwakBoN/run-gen-challenge3-part1-live.ps1)
-- [run-gen-challenge3-part2-live.ps1](/C:/Users/y.pochon/Dev/Mvx/KwakBoN/run-gen-challenge3-part2-live.ps1)
+- [run-gen-challenge3-part1-live.ps1](run-gen-challenge3-part1-live.ps1)
+- [run-gen-challenge3-part2-live.ps1](run-gen-challenge3-part2-live.ps1)
 
 These generate fresh `500`-wallet sets with balanced shard targets:
 - shard `0`: `166`
@@ -111,8 +147,8 @@ Key environment variables:
 - `FUND_NONCE_RESYNC_ATTEMPTS`
 
 Challenge 3 funding helpers:
-- [run-fund-challenge3.ps1](/C:/Users/y.pochon/Dev/Mvx/KwakBoN/run-fund-challenge3.ps1)
-- [run-fund-challenge3-part2.ps1](/C:/Users/y.pochon/Dev/Mvx/KwakBoN/run-fund-challenge3-part2.ps1)
+- [run-fund-challenge3.ps1](run-fund-challenge3.ps1)
+- [run-fund-challenge3-part2.ps1](run-fund-challenge3-part2.ps1)
 
 Current live defaults:
 - Part 1: `4.0 EGLD` per wallet
@@ -138,7 +174,7 @@ Key environment variables:
 - `SWEEP_MIN_REMAIN_EGLD`
 
 Challenge 3 sweep helper:
-- [run-sweep-challenge3-part2.ps1](/C:/Users/y.pochon/Dev/Mvx/KwakBoN/run-sweep-challenge3-part2.ps1)
+- [run-sweep-challenge3-part2.ps1](run-sweep-challenge3-part2.ps1)
 
 Sweep confirmation polling now uses concurrent status workers and bounded timeouts.
 
@@ -178,8 +214,8 @@ Key environment variables:
 - `CONFIRM_SUCCESS_TARGET`
 
 Challenge 3 sprint helpers:
-- [run-sprint-challenge3.ps1](/C:/Users/y.pochon/Dev/Mvx/KwakBoN/run-sprint-challenge3.ps1)
-- [run-sprint-challenge3-part2.ps1](/C:/Users/y.pochon/Dev/Mvx/KwakBoN/run-sprint-challenge3-part2.ps1)
+- [run-sprint-challenge3.ps1](run-sprint-challenge3.ps1)
+- [run-sprint-challenge3-part2.ps1](run-sprint-challenge3-part2.ps1)
 
 ## Bulk Sender
 
@@ -239,9 +275,76 @@ Current interpretation:
 - receiver-pool rotation materially improved Part 2 balance drift
 
 Challenge 3 bulk helpers:
-- [run-bulk-challenge3.ps1](/C:/Users/y.pochon/Dev/Mvx/KwakBoN/run-bulk-challenge3.ps1)
-- [run-bulk-challenge3-part2.ps1](/C:/Users/y.pochon/Dev/Mvx/KwakBoN/run-bulk-challenge3-part2.ps1)
+- [run-bulk-challenge3.ps1](run-bulk-challenge3.ps1)
+- [run-bulk-challenge3-part2.ps1](run-bulk-challenge3-part2.ps1)
 
 ## Local setup
 
 Create a local `.env` from `.env.example` once the first tool lands in the repo.
+
+## Challenge 4 Workflow
+
+Challenge 4 is contract-call oriented and currently uses the sanctioned `forwarder-blind-bon.wasm` flow through the vendored `dex-interactor`.
+
+Key docs:
+- [Challenge4-Prep-Plan.md](docs/Challenge4-Prep-Plan.md)
+- [Challenge4-Operator-Checklist.md](docs/Challenge4-Operator-Checklist.md)
+
+Current local baseline:
+- confirmed pair:
+  - `erd1qqqqqqqqqqqqqpgqeel2kumf0r8ffyhth7pqdujjat9nx0862jpsg2pqa`
+- sanctioned forwarders deployed on shards `0`, `1`, `2`
+- caller wallet set:
+  - `100` wallets
+  - shard split `33 / 34 / 33`
+- caller allocation:
+  - shard `1` sync pool
+  - shard `1` TE pools
+  - shard `0` async1 pool
+  - shard `2` async2 pool
+
+Useful Challenge 4 helpers:
+- wallet generation and funding:
+  - [run-gen-challenge4-operator-wallets.ps1](run-gen-challenge4-operator-wallets.ps1)
+  - [run-gen-challenge4-caller-wallets.ps1](run-gen-challenge4-caller-wallets.ps1)
+  - [run-fund-challenge4-callers.ps1](run-fund-challenge4-callers.ps1)
+  - [run-fund-challenge4-operators.ps1](run-fund-challenge4-operators.ps1)
+- deploy and control:
+  - [run-challenge4-deploy.ps1](run-challenge4-deploy.ps1)
+  - [run-challenge4-wrap.ps1](run-challenge4-wrap.ps1)
+  - [run-challenge4-drain.ps1](run-challenge4-drain.ps1)
+  - [run-sweep-challenge4-reset.ps1](run-sweep-challenge4-reset.ps1)
+- caller and pool execution:
+  - [run-challenge4-caller.ps1](run-challenge4-caller.ps1)
+  - [run-challenge4-pool.ps1](run-challenge4-pool.ps1)
+  - [run-challenge4-phase1-launch.ps1](run-challenge4-phase1-launch.ps1)
+  - [run-challenge4-phase1-postdrain.ps1](run-challenge4-phase1-postdrain.ps1)
+  - [run-challenge4-prep-wraps.ps1](run-challenge4-prep-wraps.ps1)
+  - [run-challenge4-prep-inventory-treasury.ps1](run-challenge4-prep-inventory-treasury.ps1)
+  - [run-challenge4-sustained.ps1](run-challenge4-sustained.ps1)
+
+Current documented default amounts:
+- `swap1`: `0.01 WEGLD`
+- `swap2`: `10000`
+
+Current operational recommendation:
+- full clean reset is available before rehearsal:
+  - `run-sweep-challenge4-reset.ps1`
+- preferred prep path for sustained runs:
+  - restore caller/operator `EGLD` to the lean live targets:
+    - callers `0.5 EGLD`
+    - operators `5 EGLD`
+  - treasury-seed only the opening `WEGLD` inventory:
+    - about `11.0 EGLD`
+  - seed only a tiny `USDC` starter pool for `swap2 te`
+  - all of the above is now integrated into:
+    - [run-challenge4-prep-inventory-treasury.ps1](run-challenge4-prep-inventory-treasury.ps1)
+- preferred execution path:
+  - `run-challenge4-sustained.ps1`
+  - `-ParallelPools -PoolMaxParallel 4 -DrainEveryRounds 10`
+- validated one-round sustained rehearsal succeeded with:
+  - shard `1` sync
+  - shard `1` `swap1 te`
+  - shard `1` `swap2 te`
+  - shard `0` async1
+  - shard `2` async2
