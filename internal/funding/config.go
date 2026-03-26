@@ -16,6 +16,7 @@ type Config struct {
 	GasLimit        uint64
 	WaitConfirm     bool
 	PollInterval    time.Duration
+	ConfirmTimeout  time.Duration
 	HTTPTimeout     time.Duration
 	ManifestPath    string
 	TreasuryAddress string
@@ -27,6 +28,10 @@ type Config struct {
 	ShardFilter     int
 
 	TargetAmountByStatus map[string]string
+	NonceRefreshEvery    int
+	SendCooldown         time.Duration
+	NonceRetryCooldown   time.Duration
+	NonceResyncAttempts  int
 }
 
 func getenv(key, def string) string {
@@ -81,6 +86,14 @@ func mustDurationSeconds(key string, defSeconds int) (time.Duration, error) {
 	return time.Duration(n) * time.Second, nil
 }
 
+func mustDurationMillis(key string, defMillis int) (time.Duration, error) {
+	n, err := mustInt(key, defMillis)
+	if err != nil {
+		return 0, err
+	}
+	return time.Duration(n) * time.Millisecond, nil
+}
+
 func splitCSV(in string) []string {
 	if strings.TrimSpace(in) == "" {
 		return nil
@@ -117,6 +130,10 @@ func LoadConfigFromEnv() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	confirmTimeout, err := mustDurationSeconds("FUND_CONFIRM_TIMEOUT_SECONDS", 0)
+	if err != nil {
+		return Config{}, err
+	}
 	httpTO, err := mustDurationSeconds("HTTP_TIMEOUT_SECONDS", 12)
 	if err != nil {
 		return Config{}, err
@@ -125,10 +142,38 @@ func LoadConfigFromEnv() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	nonceRefreshEvery, err := mustInt("FUND_NONCE_REFRESH_EVERY", 75)
+	if err != nil {
+		return Config{}, err
+	}
+	if nonceRefreshEvery <= 0 {
+		return Config{}, fmt.Errorf("FUND_NONCE_REFRESH_EVERY must be > 0")
+	}
+	sendCooldown, err := mustDurationMillis("FUND_SEND_COOLDOWN_MS", 25)
+	if err != nil {
+		return Config{}, err
+	}
+	nonceRetryCooldown, err := mustDurationMillis("FUND_NONCE_RETRY_COOLDOWN_MS", 750)
+	if err != nil {
+		return Config{}, err
+	}
+	nonceResyncAttempts, err := mustInt("FUND_NONCE_RESYNC_ATTEMPTS", 4)
+	if err != nil {
+		return Config{}, err
+	}
+	if nonceResyncAttempts <= 0 {
+		return Config{}, fmt.Errorf("FUND_NONCE_RESYNC_ATTEMPTS must be > 0")
+	}
 
 	targets := map[string]string{
-		"active_candidate": getenv("FUND_TARGET_ACTIVE_EGLD", "0.6"),
-		"warm_reserve":     getenv("FUND_TARGET_RESERVE_EGLD", "0.2"),
+		"active_candidate":          getenv("FUND_TARGET_ACTIVE_EGLD", "0.6"),
+		"warm_reserve":              getenv("FUND_TARGET_RESERVE_EGLD", "0.2"),
+		"window_b_reserve":          getenv("FUND_TARGET_WINDOW_B_RESERVE_EGLD", "0.2"),
+		"supernova_balanced_active": getenv("FUND_TARGET_SUPERNOVA_BALANCED_ACTIVE_EGLD", getenv("FUND_TARGET_ACTIVE_EGLD", "0.6")),
+		"challenge3_part1_sender":   getenv("FUND_TARGET_CHALLENGE3_PART1_EGLD", getenv("FUND_TARGET_ACTIVE_EGLD", "0.6")),
+		"challenge3_part2_sender":   getenv("FUND_TARGET_CHALLENGE3_PART2_EGLD", getenv("FUND_TARGET_ACTIVE_EGLD", "0.6")),
+		"challenge4_operator":       getenv("FUND_TARGET_CHALLENGE4_OPERATOR_EGLD", getenv("FUND_TARGET_ACTIVE_EGLD", "0.6")),
+		"challenge4_caller":         getenv("FUND_TARGET_CHALLENGE4_CALLER_EGLD", getenv("FUND_TARGET_ACTIVE_EGLD", "0.6")),
 	}
 
 	cfg := Config{
@@ -139,6 +184,7 @@ func LoadConfigFromEnv() (Config, error) {
 		GasLimit:        gasLimit,
 		WaitConfirm:     waitConfirm,
 		PollInterval:    poll,
+		ConfirmTimeout:  confirmTimeout,
 		HTTPTimeout:     httpTO,
 		ManifestPath:    getenv("WALLETS_MANIFEST", "./configs/wallets-manifest.json"),
 		TreasuryAddress: getenv("TREASURY_ADDRESS", ""),
@@ -148,6 +194,10 @@ func LoadConfigFromEnv() (Config, error) {
 		RequiredTags:    splitCSV(getenv("FUND_REQUIRED_TAGS", "window_a")),
 		ShardFilter:     shardFilter,
 		TargetAmountByStatus: targets,
+		NonceRefreshEvery:    nonceRefreshEvery,
+		SendCooldown:         sendCooldown,
+		NonceRetryCooldown:   nonceRetryCooldown,
+		NonceResyncAttempts:  nonceResyncAttempts,
 	}
 
 	if cfg.TreasuryAddress == "" || cfg.TreasuryPemPath == "" {

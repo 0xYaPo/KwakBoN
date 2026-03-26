@@ -1,0 +1,15 @@
+param(
+    [Parameter(Mandatory = $true)]
+    [ValidateSet("0", "1", "2")]
+    [string]$Shard,
+    [string]$ConfigPath,
+    [string]$StatePath
+)
+
+& (Join-Path $PSScriptRoot "run-challenge4-interactor.ps1") `
+    -Shard $Shard `
+    -ConfigPath $ConfigPath `
+    -StatePath $StatePath `
+    -InteractorArgs @("get-liquidity")
+
+exit $LASTEXITCODE

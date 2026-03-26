@@ -23,6 +23,14 @@ func (w *Wallet) SetNonce(n uint64) {
 	w.NextNonce = n
 }
 
+func (w *Wallet) SetNonceAtLeast(n uint64) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if n > w.NextNonce {
+		w.NextNonce = n
+	}
+}
+
 func (w *Wallet) ReserveNonce() uint64 {
 	w.mu.Lock()
 	defer w.mu.Unlock()

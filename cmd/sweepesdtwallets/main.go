@@ -1,8 +1,10 @@
-package sweep
+package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/hex"
+	"flag"
 	"fmt"
 	"log"
 	"math/big"
@@ -19,30 +21,99 @@ import (
 	"kwakbon/internal/wallets"
 )
 
-type Options struct {
-	DryRun bool
+type config struct {
+	GatewayURL      string
+	ChainID         string
+	TxVersion       uint32
+	GasPrice        uint64
+	GasLimit        uint64
+	ManifestPath    string
+	TreasuryAddress string
+	TokenID         string
+	WaitConfirm     bool
+	ConfirmWorkers  int
+	PollInterval    time.Duration
+	ConfirmTimeout  time.Duration
+	HTTPTimeout     time.Duration
+	IncludeStatuses []string
+	ExcludeStatuses []string
+	RequiredTags    []string
+	ShardFilter     int
 }
 
-type App struct {
-	cfg       Config
-	opt       Options
-	gw        *gateway.Client
-	records   []manifest.WalletRecord
-	minRemain *big.Int
-	feeBase   *big.Int
-}
-
-type sweepTarget struct {
+type target struct {
 	WalletID    string
 	Address     string
 	Shard       int
 	Status      string
-	BalanceBase *big.Int
-	SweepBase   *big.Int
+	TokenBase   *big.Int
 	PemPath     string
 }
 
-func New(cfg Config, opt Options) (*App, error) {
+func main() {
+	var (
+		cfg    config
+		dryRun bool
+	)
+
+	flag.StringVar(&cfg.GatewayURL, "gateway", "https://api.battleofnodes.com", "gateway/api base URL")
+	flag.StringVar(&cfg.ChainID, "chain-id", "B", "chain id")
+	txVersion := flag.Uint("tx-version", 2, "tx version")
+	flag.Uint64Var(&cfg.GasPrice, "gas-price", 1000000000, "gas price")
+	flag.Uint64Var(&cfg.GasLimit, "gas-limit", 500000, "gas limit for ESDT sweep")
+	flag.StringVar(&cfg.ManifestPath, "manifest", "./configs/challenge4/wallets-manifest.challenge4-callers.json", "wallet manifest path")
+	flag.StringVar(&cfg.TreasuryAddress, "treasury-address", "erd1n28dse0sej7m2rz02ceftr30596arzx2a0trcegl9p3ztdagjahqa9szcx", "treasury bech32")
+	flag.StringVar(&cfg.TokenID, "token-id", "WEGLD-bd4d79", "token identifier to sweep")
+	flag.BoolVar(&cfg.WaitConfirm, "wait-confirm", true, "wait for final status")
+	flag.IntVar(&cfg.ConfirmWorkers, "confirm-workers", 32, "number of confirmation workers")
+	pollSeconds := flag.Int("poll-interval-seconds", 3, "confirmation poll interval seconds")
+	confirmTimeoutSeconds := flag.Int("confirm-timeout-seconds", 180, "confirmation timeout seconds")
+	httpTimeoutSeconds := flag.Int("http-timeout-seconds", 25, "http timeout seconds")
+	includeStatuses := flag.String("include-statuses", "", "comma-separated allowed statuses")
+	excludeStatuses := flag.String("exclude-statuses", "treasury,receiver", "comma-separated excluded statuses")
+	requiredTags := flag.String("required-tags", "", "comma-separated required tags")
+	flag.IntVar(&cfg.ShardFilter, "shard-filter", -1, "restrict to shard, -1 means all")
+	flag.BoolVar(&dryRun, "dry-run", false, "preview matched wallets and token balances without sending")
+	flag.Parse()
+
+	cfg.TxVersion = uint32(*txVersion)
+	cfg.PollInterval = time.Duration(*pollSeconds) * time.Second
+	cfg.ConfirmTimeout = time.Duration(*confirmTimeoutSeconds) * time.Second
+	cfg.HTTPTimeout = time.Duration(*httpTimeoutSeconds) * time.Second
+	cfg.IncludeStatuses = splitCSV(*includeStatuses)
+	cfg.ExcludeStatuses = splitCSV(*excludeStatuses)
+	cfg.RequiredTags = splitCSV(*requiredTags)
+
+	if cfg.TreasuryAddress == "" {
+		log.Fatal("missing -treasury-address")
+	}
+	if cfg.TokenID == "" {
+		log.Fatal("missing -token-id")
+	}
+	if cfg.ConfirmWorkers <= 0 {
+		log.Fatal("confirm-workers must be > 0")
+	}
+
+	app, err := newApp(cfg, dryRun)
+	if err != nil {
+		log.Fatalf("init error: %v", err)
+	}
+
+	start := time.Now()
+	if err := app.run(context.Background()); err != nil {
+		log.Fatalf("run error: %v", err)
+	}
+	fmt.Printf("[sweepesdtwallets] done in %s\n", time.Since(start))
+}
+
+type app struct {
+	cfg     config
+	dryRun  bool
+	gw      *gateway.Client
+	records []manifest.WalletRecord
+}
+
+func newApp(cfg config, dryRun bool) (*app, error) {
 	gw := gateway.New(cfg.GatewayURL, cfg.HTTPTimeout)
 	mf, err := manifest.Load(cfg.ManifestPath)
 	if err != nil {
@@ -51,12 +122,6 @@ func New(cfg Config, opt Options) (*App, error) {
 	if err := mf.Validate(); err != nil {
 		return nil, err
 	}
-
-	minRemain, err := esdt.AmountToBaseUnits(cfg.MinRemainEGLD, 18)
-	if err != nil {
-		return nil, fmt.Errorf("invalid SWEEP_MIN_REMAIN_EGLD: %w", err)
-	}
-	feeBase := new(big.Int).Mul(new(big.Int).SetUint64(cfg.GasPrice), new(big.Int).SetUint64(cfg.GasLimit))
 
 	records := make([]manifest.WalletRecord, 0, len(mf.Wallets))
 	for _, record := range mf.Wallets {
@@ -84,31 +149,35 @@ func New(cfg Config, opt Options) (*App, error) {
 		records = append(records, record)
 	}
 
-	return &App{
-		cfg:       cfg,
-		opt:       opt,
-		gw:        gw,
-		records:   records,
-		minRemain: minRemain,
-		feeBase:   feeBase,
-	}, nil
+	return &app{cfg: cfg, dryRun: dryRun, gw: gw, records: records}, nil
 }
 
-func (a *App) Run(ctx context.Context) error {
+func (a *app) run(ctx context.Context) error {
 	if len(a.records) == 0 {
 		return fmt.Errorf("no manifest wallets matched the sweep filters")
 	}
 
-	targets, totalSweep, err := a.computeTargets(ctx)
+	targets, total, err := a.computeTargets(ctx)
 	if err != nil {
 		return err
 	}
-	log.Printf("[sweepwallets] treasury=%s matched=%d sweepable=%d shardFilter=%d include=%s tags=%s totalSweepBase=%s", a.cfg.TreasuryAddress, len(a.records), len(targets), a.cfg.ShardFilter, strings.Join(a.cfg.IncludeStatuses, ","), strings.Join(a.cfg.RequiredTags, ","), totalSweep.String())
 
-	if a.opt.DryRun {
+	log.Printf(
+		"[sweepesdtwallets] token=%s treasury=%s matched=%d sweepable=%d shardFilter=%d include=%s tags=%s totalBase=%s",
+		a.cfg.TokenID,
+		a.cfg.TreasuryAddress,
+		len(a.records),
+		len(targets),
+		a.cfg.ShardFilter,
+		strings.Join(a.cfg.IncludeStatuses, ","),
+		strings.Join(a.cfg.RequiredTags, ","),
+		total.String(),
+	)
+
+	if a.dryRun {
 		for i := 0; i < min(10, len(targets)); i++ {
 			t := targets[i]
-			log.Printf("[dry-run] wallet=%s status=%s shard=%d balance=%s sweep=%s", t.Address, t.Status, t.Shard, t.BalanceBase.String(), t.SweepBase.String())
+			log.Printf("[dry-run] wallet=%s status=%s shard=%d token=%s amount=%s", t.Address, t.Status, t.Shard, a.cfg.TokenID, t.TokenBase.String())
 		}
 		return nil
 	}
@@ -117,87 +186,66 @@ func (a *App) Run(ctx context.Context) error {
 	for i, target := range targets {
 		hash, err := a.sendSweep(ctx, target)
 		if err != nil {
-			return fmt.Errorf("sweep %s: %w", target.Address, err)
+			return fmt.Errorf("sweep token %s from %s: %w", a.cfg.TokenID, target.Address, err)
 		}
 		hashes = append(hashes, hash)
 		if (i+1)%25 == 0 || i+1 == len(targets) {
-			log.Printf("[sweepwallets] sent=%d/%d", i+1, len(targets))
+			log.Printf("[sweepesdtwallets] sent=%d/%d", i+1, len(targets))
 		}
 	}
 
 	if !a.cfg.WaitConfirm {
 		return nil
 	}
+
 	successes, failed, err := a.waitAll(ctx, hashes)
 	if err != nil {
 		return err
 	}
-	log.Printf("[sweepwallets] confirmations done success=%d failed=%d total=%d", successes, failed, len(hashes))
+	log.Printf("[sweepesdtwallets] confirmations done success=%d failed=%d total=%d", successes, failed, len(hashes))
 	if successes != len(hashes) {
-		return fmt.Errorf("only %d/%d sweep txs succeeded", successes, len(hashes))
+		return fmt.Errorf("only %d/%d ESDT sweep txs succeeded", successes, len(hashes))
 	}
 	return nil
 }
 
-func (a *App) computeTargets(ctx context.Context) ([]sweepTarget, *big.Int, error) {
-	out := make([]sweepTarget, 0, len(a.records))
+func (a *app) computeTargets(ctx context.Context) ([]target, *big.Int, error) {
+	out := make([]target, 0, len(a.records))
 	total := big.NewInt(0)
-	threshold := new(big.Int).Add(new(big.Int).Set(a.feeBase), a.minRemain)
 	start := time.Now()
 	scanned := 0
 	sweepable := 0
 
 	for _, record := range a.records {
 		scanned++
-		balanceStr, err := a.getBalanceWithRetry(ctx, record.Address)
+		balanceStr, err := a.getTokenBalanceWithRetry(ctx, record.Address)
 		if err != nil {
-			return nil, nil, fmt.Errorf("get balance for %s: %w", record.Address, err)
+			return nil, nil, fmt.Errorf("get token balance for %s: %w", record.Address, err)
 		}
 		balance, ok := new(big.Int).SetString(balanceStr, 10)
 		if !ok {
-			return nil, nil, fmt.Errorf("invalid balance for %s: %s", record.Address, balanceStr)
+			return nil, nil, fmt.Errorf("invalid token balance for %s: %s", record.Address, balanceStr)
 		}
-		if balance.Cmp(threshold) <= 0 {
-			continue
-		}
-
-		sweepValue := new(big.Int).Sub(balance, a.feeBase)
-		sweepValue.Sub(sweepValue, a.minRemain)
-		if sweepValue.Sign() <= 0 {
+		if balance.Sign() <= 0 {
 			if scanned%25 == 0 || scanned == len(a.records) {
-				log.Printf(
-					"[sweepwallets scan] scanned=%d/%d sweepable=%d totalSweepBase=%s elapsed=%s",
-					scanned,
-					len(a.records),
-					sweepable,
-					total.String(),
-					time.Since(start).Round(time.Second),
-				)
+				log.Printf("[sweepesdtwallets scan] token=%s scanned=%d/%d sweepable=%d totalBase=%s elapsed=%s", a.cfg.TokenID, scanned, len(a.records), sweepable, total.String(), time.Since(start).Round(time.Second))
 			}
 			continue
 		}
 
-		total.Add(total, sweepValue)
+		total.Add(total, balance)
 		sweepable++
-		out = append(out, sweepTarget{
-			WalletID:    record.WalletID,
-			Address:     record.Address,
-			Shard:       record.Shard,
-			Status:      record.Status,
-			BalanceBase: balance,
-			SweepBase:   sweepValue,
-			PemPath:     record.PemPath,
+		out = append(out, target{
+			WalletID:  record.WalletID,
+			Address:   record.Address,
+			Shard:     record.Shard,
+			Status:    record.Status,
+			TokenBase: balance,
+			PemPath:   record.PemPath,
 		})
 
 		if scanned%25 == 0 || scanned == len(a.records) {
-			log.Printf(
-				"[sweepwallets scan] scanned=%d/%d sweepable=%d totalSweepBase=%s elapsed=%s",
-				scanned,
-				len(a.records),
-				sweepable,
-				total.String(),
-				time.Since(start).Round(time.Second),
-			)
+			log.Printf("[sweepesdtwallets scan] token=%s scanned=%d/%d sweepable=%d totalBase=%s elapsed=%s", a.cfg.TokenID, scanned, len(a.records), sweepable, total.String(), time.Since(start).Round(time.Second))
 		}
 	}
 
@@ -211,10 +259,10 @@ func (a *App) computeTargets(ctx context.Context) ([]sweepTarget, *big.Int, erro
 	return out, total, nil
 }
 
-func (a *App) getBalanceWithRetry(ctx context.Context, address string) (string, error) {
+func (a *app) getTokenBalanceWithRetry(ctx context.Context, address string) (string, error) {
 	var lastErr error
 	for attempt := 1; attempt <= 4; attempt++ {
-		balanceStr, err := a.gw.GetAccountBalance(ctx, address)
+		balanceStr, err := a.gw.GetAccountTokenBalance(ctx, address, a.cfg.TokenID)
 		if err == nil {
 			return balanceStr, nil
 		}
@@ -222,7 +270,7 @@ func (a *App) getBalanceWithRetry(ctx context.Context, address string) (string, 
 		if attempt == 4 || !isTransientBalanceError(err) {
 			break
 		}
-		log.Printf("[sweepwallets balance-retry] wallet=%s attempt=%d err=%v", address, attempt, err)
+		log.Printf("[sweepesdtwallets balance-retry] wallet=%s token=%s attempt=%d err=%v", address, a.cfg.TokenID, attempt, err)
 		select {
 		case <-ctx.Done():
 			return "", ctx.Err()
@@ -250,7 +298,7 @@ func isTransientBalanceError(err error) bool {
 		strings.Contains(msg, "invalid character '<'")
 }
 
-func (a *App) sendSweep(ctx context.Context, target sweepTarget) (string, error) {
+func (a *app) sendSweep(ctx context.Context, target target) (string, error) {
 	signer, err := wallets.NewPemSigner(target.PemPath, target.Address)
 	if err != nil {
 		return "", fmt.Errorf("load signer: %w", err)
@@ -260,14 +308,17 @@ func (a *App) sendSweep(ctx context.Context, target sweepTarget) (string, error)
 		return "", fmt.Errorf("get nonce: %w", err)
 	}
 
+	rawData := esdt.ESDTTransferData(a.cfg.TokenID, target.TokenBase)
+	gatewayData := base64.StdEncoding.EncodeToString([]byte(rawData))
+
 	tx := gateway.TxSendRequest{
 		Nonce:    nonce,
-		Value:    target.SweepBase.String(),
+		Value:    "0",
 		Receiver: a.cfg.TreasuryAddress,
 		Sender:   target.Address,
 		GasPrice: a.cfg.GasPrice,
 		GasLimit: a.cfg.GasLimit,
-		Data:     "",
+		Data:     gatewayData,
 		ChainID:  a.cfg.ChainID,
 		Version:  a.cfg.TxVersion,
 	}
@@ -279,7 +330,7 @@ func (a *App) sendSweep(ctx context.Context, target sweepTarget) (string, error)
 		Sender:   tx.Sender,
 		GasPrice: tx.GasPrice,
 		GasLimit: tx.GasLimit,
-		Data:     "",
+		Data:     rawData,
 		ChainID:  tx.ChainID,
 		Version:  tx.Version,
 	}
@@ -296,7 +347,7 @@ func (a *App) sendSweep(ctx context.Context, target sweepTarget) (string, error)
 	return a.gw.SendTx(ctx, tx)
 }
 
-func (a *App) waitAll(ctx context.Context, hashes []string) (int, int, error) {
+func (a *app) waitAll(ctx context.Context, hashes []string) (int, int, error) {
 	pending := make(map[string]struct{}, len(hashes))
 	for _, h := range hashes {
 		pending[h] = struct{}{}
@@ -308,7 +359,7 @@ func (a *App) waitAll(ctx context.Context, hashes []string) (int, int, error) {
 	for len(pending) > 0 {
 		if a.cfg.ConfirmTimeout > 0 && time.Since(start) >= a.cfg.ConfirmTimeout {
 			return successes, failed, fmt.Errorf(
-				"sweep confirmation timeout after %s: pending=%d success=%d failed=%d samplePending=%s",
+				"esdt sweep confirmation timeout after %s: pending=%d success=%d failed=%d samplePending=%s",
 				a.cfg.ConfirmTimeout,
 				len(pending),
 				successes,
@@ -338,14 +389,7 @@ func (a *App) waitAll(ctx context.Context, hashes []string) (int, int, error) {
 				case <-ctx.Done():
 					return
 				case <-ticker.C:
-					log.Printf(
-						"[sweepwallets confirm progress] checked=%d/%d resolved=%d successDelta=%d failedDelta=%d",
-						checked.Load(),
-						total,
-						deltaSuccess.Load()+deltaFailed.Load(),
-						deltaSuccess.Load(),
-						deltaFailed.Load(),
-					)
+					log.Printf("[sweepesdtwallets confirm progress] token=%s checked=%d/%d resolved=%d successDelta=%d failedDelta=%d", a.cfg.TokenID, checked.Load(), total, deltaSuccess.Load()+deltaFailed.Load(), deltaSuccess.Load(), deltaFailed.Load())
 				}
 			}
 		}(roundTotal)
@@ -393,7 +437,7 @@ func (a *App) waitAll(ctx context.Context, hashes []string) (int, int, error) {
 		successes += len(resolvedSuccess)
 		failed += len(resolvedFailed)
 
-		log.Printf("[sweepwallets confirm] pending=%d success=%d failed=%d", len(pending), successes, failed)
+		log.Printf("[sweepesdtwallets confirm] token=%s pending=%d success=%d failed=%d", a.cfg.TokenID, len(pending), successes, failed)
 		if len(pending) == 0 {
 			break
 		}
@@ -420,6 +464,21 @@ func samplePendingHashes(pending map[string]struct{}, limit int) []string {
 		hashes = hashes[:limit]
 	}
 	return hashes
+}
+
+func splitCSV(in string) []string {
+	if strings.TrimSpace(in) == "" {
+		return nil
+	}
+	parts := strings.Split(in, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		v := strings.TrimSpace(part)
+		if v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 func containsFold(items []string, want string) bool {

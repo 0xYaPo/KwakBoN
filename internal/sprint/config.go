@@ -22,6 +22,8 @@ type Config struct {
 	RequiredSenderTags   []string
 	RequiredReceiverTags []string
 	ShardFilter          int
+	RoutingMode          string
+	ReuseSendersAsReceivers bool
 
 	IncludeTreasuryReceiver bool
 	ReceiverWeight          int
@@ -32,6 +34,11 @@ type Config struct {
 	Workers       int
 	ConfirmWorkers int
 	Duration       time.Duration
+	MaxInflightPerWallet         int
+	SuccessCooldown              time.Duration
+	TransientCooldown            time.Duration
+	QuarantineCooldown           time.Duration
+	QuarantineTransientThreshold int
 
 	Value    string
 	GasLimit uint64
@@ -95,6 +102,14 @@ func mustDurationSeconds(key string, defSeconds int) (time.Duration, error) {
 		return 0, err
 	}
 	return time.Duration(n) * time.Second, nil
+}
+
+func mustDurationMillis(key string, defMillis int) (time.Duration, error) {
+	n, err := mustInt(key, defMillis)
+	if err != nil {
+		return 0, err
+	}
+	return time.Duration(n) * time.Millisecond, nil
 }
 
 func splitCSV(in string) []string {
@@ -176,6 +191,32 @@ func LoadConfigFromEnv() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	maxInflight, err := mustInt("SPRINT_MAX_INFLIGHT_PER_WALLET", 2)
+	if err != nil {
+		return Config{}, err
+	}
+	if maxInflight <= 0 {
+		return Config{}, fmt.Errorf("SPRINT_MAX_INFLIGHT_PER_WALLET must be > 0")
+	}
+	successCooldown, err := mustDurationMillis("SPRINT_SUCCESS_COOLDOWN_MS", 50)
+	if err != nil {
+		return Config{}, err
+	}
+	transientCooldown, err := mustDurationMillis("SPRINT_TRANSIENT_COOLDOWN_MS", 1500)
+	if err != nil {
+		return Config{}, err
+	}
+	quarantineCooldown, err := mustDurationMillis("SPRINT_QUARANTINE_COOLDOWN_MS", 10000)
+	if err != nil {
+		return Config{}, err
+	}
+	quarantineThreshold, err := mustInt("SPRINT_QUARANTINE_TRANSIENT_THRESHOLD", 3)
+	if err != nil {
+		return Config{}, err
+	}
+	if quarantineThreshold <= 0 {
+		return Config{}, fmt.Errorf("SPRINT_QUARANTINE_TRANSIENT_THRESHOLD must be > 0")
+	}
 	poll, err := mustDurationSeconds("POLL_INTERVAL_SECONDS", 3)
 	if err != nil {
 		return Config{}, err
@@ -200,6 +241,16 @@ func LoadConfigFromEnv() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	routingMode := strings.ToLower(strings.TrimSpace(getenv("SPRINT_ROUTING_MODE", "same-shard")))
+	switch routingMode {
+	case "same-shard", "cross-shard":
+	default:
+		return Config{}, fmt.Errorf("SPRINT_ROUTING_MODE must be same-shard or cross-shard")
+	}
+	reuseSendersAsReceivers, err := mustBool("SPRINT_REUSE_SENDERS_AS_RECEIVERS", false)
+	if err != nil {
+		return Config{}, err
+	}
 
 	return Config{
 		Network:                getenv("DEFAULT_NETWORK", "battle"),
@@ -213,6 +264,8 @@ func LoadConfigFromEnv() (Config, error) {
 		RequiredSenderTags:     splitCSV(getenv("SPRINT_REQUIRED_SENDER_TAGS", "window_a,sender")),
 		RequiredReceiverTags:   splitCSV(getenv("SPRINT_REQUIRED_RECEIVER_TAGS", "window_a,sink")),
 		ShardFilter:            shardFilter,
+		RoutingMode:            routingMode,
+		ReuseSendersAsReceivers: reuseSendersAsReceivers,
 		IncludeTreasuryReceiver: includeTreasury,
 		ReceiverWeight:         receiverWeight,
 		TreasuryReceiverWeight: treasuryWeight,
@@ -221,6 +274,11 @@ func LoadConfigFromEnv() (Config, error) {
 		Workers:                workers,
 		ConfirmWorkers:         confirmWorkers,
 		Duration:               duration,
+		MaxInflightPerWallet:   maxInflight,
+		SuccessCooldown:        successCooldown,
+		TransientCooldown:      transientCooldown,
+		QuarantineCooldown:     quarantineCooldown,
+		QuarantineTransientThreshold: quarantineThreshold,
 		Value:                  getenv("SPRINT_TX_VALUE", "1"),
 		GasLimit:               gasLimit,
 		GasPrice:               gasPrice,

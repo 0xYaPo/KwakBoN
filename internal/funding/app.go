@@ -8,6 +8,7 @@ import (
 	"math/big"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"kwakbon/internal/esdt"
@@ -117,14 +118,42 @@ func (a *App) Run(ctx context.Context) error {
 	nonce := treasuryNonce
 	hashes := make([]string, 0, len(targets))
 	for i, target := range targets {
+		if i > 0 && i%a.cfg.NonceRefreshEvery == 0 {
+			networkNonce, err := a.gw.GetAccountNonce(ctx, a.cfg.TreasuryAddress)
+			if err != nil {
+				return fmt.Errorf("refresh treasury nonce after %d sends: %w", i, err)
+			}
+			if networkNonce > nonce {
+				log.Printf("[fundwallets] treasury nonce refresh old=%d new=%d after=%d", nonce, networkNonce, i)
+				nonce = networkNonce
+			}
+		}
+
 		hash, err := a.sendTopUp(ctx, nonce, target)
 		if err != nil {
-			return fmt.Errorf("fund %s: %w", target.Address, err)
+			if a.shouldRefreshNonce(err) {
+				resyncedNonce, nErr := a.resyncTreasuryNonce(ctx, nonce, target.Address)
+				if nErr != nil {
+					return fmt.Errorf("fund %s failed with nonce issue and treasury nonce resync failed: %w", target.Address, nErr)
+				}
+				nonce = resyncedNonce
+				hash, err = a.sendTopUp(ctx, nonce, target)
+				if err != nil {
+					return fmt.Errorf("fund %s after nonce resync: %w", target.Address, err)
+				}
+			} else {
+				return fmt.Errorf("fund %s: %w", target.Address, err)
+			}
 		}
 		nonce++
 		hashes = append(hashes, hash)
 		if (i+1)%25 == 0 || i+1 == len(targets) {
 			log.Printf("[fundwallets] sent=%d/%d", i+1, len(targets))
+		}
+		if a.cfg.SendCooldown > 0 {
+			if sleepErr := sleepWithContext(ctx, a.cfg.SendCooldown); sleepErr != nil {
+				return sleepErr
+			}
 		}
 	}
 
@@ -143,37 +172,68 @@ func (a *App) Run(ctx context.Context) error {
 }
 
 func (a *App) computeTargets(ctx context.Context) ([]fundingTarget, *big.Int, error) {
+	type result struct {
+		target fundingTarget
+		skip   bool
+		err    error
+	}
+
+	results := make([]result, len(a.records))
+	sem := make(chan struct{}, 32)
+	var wg sync.WaitGroup
+
+	for i, record := range a.records {
+		wg.Add(1)
+		go func(i int, record manifest.WalletRecord) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			targetHuman := a.cfg.TargetAmountByStatus[record.Status]
+			targetBase, err := esdt.AmountToBaseUnits(targetHuman, 18)
+			if err != nil {
+				results[i] = result{err: fmt.Errorf("invalid target amount for status %s: %w", record.Status, err)}
+				return
+			}
+			balanceStr, err := a.gw.GetAccountBalance(ctx, record.Address)
+			if err != nil {
+				results[i] = result{err: fmt.Errorf("get balance for %s: %w", record.Address, err)}
+				return
+			}
+			currentBase, ok := new(big.Int).SetString(balanceStr, 10)
+			if !ok {
+				results[i] = result{err: fmt.Errorf("invalid balance for %s: %s", record.Address, balanceStr)}
+				return
+			}
+			if currentBase.Cmp(targetBase) >= 0 {
+				results[i] = result{skip: true}
+				return
+			}
+			deficit := new(big.Int).Sub(targetBase, currentBase)
+			results[i] = result{target: fundingTarget{
+				WalletID:    record.WalletID,
+				Address:     record.Address,
+				Shard:       record.Shard,
+				Status:      record.Status,
+				CurrentBase: currentBase,
+				TargetBase:  targetBase,
+				DeficitBase: deficit,
+			}}
+		}(i, record)
+	}
+	wg.Wait()
+
 	out := make([]fundingTarget, 0, len(a.records))
 	total := big.NewInt(0)
-
-	for _, record := range a.records {
-		targetHuman := a.cfg.TargetAmountByStatus[record.Status]
-		targetBase, err := esdt.AmountToBaseUnits(targetHuman, 18)
-		if err != nil {
-			return nil, nil, fmt.Errorf("invalid target amount for status %s: %w", record.Status, err)
+	for _, r := range results {
+		if r.err != nil {
+			return nil, nil, r.err
 		}
-		balanceStr, err := a.gw.GetAccountBalance(ctx, record.Address)
-		if err != nil {
-			return nil, nil, fmt.Errorf("get balance for %s: %w", record.Address, err)
-		}
-		currentBase, ok := new(big.Int).SetString(balanceStr, 10)
-		if !ok {
-			return nil, nil, fmt.Errorf("invalid balance for %s: %s", record.Address, balanceStr)
-		}
-		if currentBase.Cmp(targetBase) >= 0 {
+		if r.skip {
 			continue
 		}
-		deficit := new(big.Int).Sub(targetBase, currentBase)
-		total.Add(total, deficit)
-		out = append(out, fundingTarget{
-			WalletID:    record.WalletID,
-			Address:     record.Address,
-			Shard:       record.Shard,
-			Status:      record.Status,
-			CurrentBase: currentBase,
-			TargetBase:  targetBase,
-			DeficitBase: deficit,
-		})
+		total.Add(total, r.target.DeficitBase)
+		out = append(out, r.target)
 	}
 
 	sort.Slice(out, func(i, j int) bool {
@@ -230,8 +290,18 @@ func (a *App) waitAll(ctx context.Context, hashes []string) (int, int, error) {
 	}
 	successes := 0
 	failed := 0
+	start := time.Now()
 
 	for len(pending) > 0 {
+		if a.cfg.ConfirmTimeout > 0 && time.Since(start) >= a.cfg.ConfirmTimeout {
+			return successes, failed, fmt.Errorf(
+				"funding confirmation timeout after %s: pending=%d success=%d failed=%d",
+				a.cfg.ConfirmTimeout,
+				len(pending),
+				successes,
+				failed,
+			)
+		}
 		for h := range pending {
 			status, err := a.gw.GetTxStatus(ctx, h)
 			if err != nil {
@@ -284,4 +354,51 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func (a *App) shouldRefreshNonce(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "lowernonceintx") || strings.Contains(msg, "veryhighnonceintx")
+}
+
+func (a *App) resyncTreasuryNonce(ctx context.Context, currentNonce uint64, targetAddress string) (uint64, error) {
+	bestNonce := currentNonce
+	for attempt := 1; attempt <= a.cfg.NonceResyncAttempts; attempt++ {
+		if sleepErr := sleepWithContext(ctx, a.cfg.NonceRetryCooldown); sleepErr != nil {
+			return 0, sleepErr
+		}
+		networkNonce, err := a.gw.GetAccountNonce(ctx, a.cfg.TreasuryAddress)
+		if err != nil {
+			if attempt == a.cfg.NonceResyncAttempts {
+				return 0, err
+			}
+			continue
+		}
+		if networkNonce > bestNonce {
+			bestNonce = networkNonce
+		}
+		log.Printf("[fundwallets] treasury nonce resync target=%s attempt=%d current=%d observed=%d best=%d", targetAddress, attempt, currentNonce, networkNonce, bestNonce)
+		if networkNonce >= currentNonce {
+			return networkNonce, nil
+		}
+	}
+	if bestNonce > currentNonce {
+		return bestNonce, nil
+	}
+	return 0, fmt.Errorf("stale treasury nonce after %d attempts: current=%d bestObserved=%d", a.cfg.NonceResyncAttempts, currentNonce, bestNonce)
+}
+
+func sleepWithContext(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
 }

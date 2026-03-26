@@ -24,14 +24,25 @@ type Options struct {
 type senderWallet struct {
 	*wallets.Wallet
 	Shard int
+
+	stateMu         sync.Mutex
+	inflight        int
+	nextEligibleAt  time.Time
+	transientErrors int
+}
+
+type receiverTarget struct {
+	Address string
+	Shard   int
 }
 
 type App struct {
-	cfg       Config
-	opt       Options
-	gw        *gateway.Client
-	senders   []senderWallet
-	receivers []string
+	cfg            Config
+	opt            Options
+	gw             *gateway.Client
+	senders        []senderWallet
+	receivers      []receiverTarget
+	reservedTarget atomic.Uint64
 }
 
 func New(cfg Config, opt Options) (*App, error) {
@@ -45,12 +56,16 @@ func New(cfg Config, opt Options) (*App, error) {
 	}
 
 	senders := make([]senderWallet, 0)
-	receivers := make([]string, 0)
+	receivers := make([]receiverTarget, 0)
 
 	if len(cfg.ReceiverAddresses) > 0 {
 		for _, address := range cfg.ReceiverAddresses {
+			shard, ok := findWalletShard(mf, address)
+			if !ok {
+				return nil, fmt.Errorf("receiver %s not found in manifest", address)
+			}
 			for i := 0; i < max(1, cfg.ReceiverWeight); i++ {
-				receivers = append(receivers, address)
+				receivers = append(receivers, receiverTarget{Address: address, Shard: shard})
 			}
 		}
 		if cfg.IncludeTreasuryReceiver {
@@ -60,7 +75,7 @@ func New(cfg Config, opt Options) (*App, error) {
 				}
 				if strings.EqualFold(record.Status, "treasury") {
 					for i := 0; i < max(1, cfg.TreasuryReceiverWeight); i++ {
-						receivers = append(receivers, record.Address)
+						receivers = append(receivers, receiverTarget{Address: record.Address, Shard: record.Shard})
 					}
 					break
 				}
@@ -94,13 +109,13 @@ func New(cfg Config, opt Options) (*App, error) {
 
 		if len(cfg.ReceiverAddresses) == 0 && containsFold(cfg.ReceiverStatuses, record.Status) && containsAllTags(record.Tags, cfg.RequiredReceiverTags) {
 			for i := 0; i < max(1, cfg.ReceiverWeight); i++ {
-				receivers = append(receivers, record.Address)
+				receivers = append(receivers, receiverTarget{Address: record.Address, Shard: record.Shard})
 			}
 			continue
 		}
 		if len(cfg.ReceiverAddresses) == 0 && cfg.IncludeTreasuryReceiver && strings.EqualFold(record.Status, "treasury") {
 			for i := 0; i < max(1, cfg.TreasuryReceiverWeight); i++ {
-				receivers = append(receivers, record.Address)
+				receivers = append(receivers, receiverTarget{Address: record.Address, Shard: record.Shard})
 			}
 		}
 	}
@@ -108,8 +123,21 @@ func New(cfg Config, opt Options) (*App, error) {
 	if len(senders) == 0 {
 		return nil, fmt.Errorf("no senders matched manifest filters")
 	}
+	if cfg.ReuseSendersAsReceivers {
+		for _, sender := range senders {
+			for i := 0; i < max(1, cfg.ReceiverWeight); i++ {
+				receivers = append(receivers, receiverTarget{
+					Address: sender.Address,
+					Shard:   sender.Shard,
+				})
+			}
+		}
+	}
 	if len(receivers) == 0 {
 		return nil, fmt.Errorf("no receivers matched manifest filters")
+	}
+	if err := validateShardCoverage(senders, receivers, cfg.RoutingMode); err != nil {
+		return nil, err
 	}
 
 	return &App{
@@ -122,16 +150,31 @@ func New(cfg Config, opt Options) (*App, error) {
 }
 
 func (a *App) Run(ctx context.Context) error {
+	nonceSem := make(chan struct{}, 32)
+	nonceErrCh := make(chan error, len(a.senders))
+	var nonceWg sync.WaitGroup
 	for i := range a.senders {
-		nonce, err := a.gw.GetAccountNonce(ctx, a.senders[i].Address)
-		if err != nil {
-			return fmt.Errorf("get nonce for %s: %w", a.senders[i].Address, err)
-		}
-		a.senders[i].SetNonce(nonce)
+		nonceWg.Add(1)
+		go func(i int) {
+			defer nonceWg.Done()
+			nonceSem <- struct{}{}
+			defer func() { <-nonceSem }()
+			nonce, err := a.gw.GetAccountNonce(ctx, a.senders[i].Address)
+			if err != nil {
+				nonceErrCh <- fmt.Errorf("get nonce for %s: %w", a.senders[i].Address, err)
+				return
+			}
+			a.senders[i].SetNonce(nonce)
+		}(i)
+	}
+	nonceWg.Wait()
+	close(nonceErrCh)
+	if err := <-nonceErrCh; err != nil {
+		return err
 	}
 
 	log.Printf(
-		"[sprint] network=%s chainID=%s gateway=%s senders=%d receivers=%d targetTx=%d duration=%s tps=%d workers=%d confirmWorkers=%d value=%s gasLimit=%d gasPrice=%d waitConfirm=%t continueOnTransient=%t confirmTarget=%d confirmTimeout=%s shardFilter=%d",
+		"[sprint] network=%s chainID=%s gateway=%s senders=%d receivers=%d targetTx=%d duration=%s tps=%d workers=%d confirmWorkers=%d value=%s gasLimit=%d gasPrice=%d waitConfirm=%t continueOnTransient=%t confirmTarget=%d confirmTimeout=%s shardFilter=%d routingMode=%s reuseSendersAsReceivers=%t maxInflightPerWallet=%d successCooldown=%s transientCooldown=%s quarantineCooldown=%s quarantineThreshold=%d",
 		a.cfg.Network,
 		a.cfg.ChainID,
 		a.cfg.GatewayURL,
@@ -150,11 +193,22 @@ func (a *App) Run(ctx context.Context) error {
 		a.cfg.ConfirmSuccessTarget,
 		a.cfg.ConfirmTimeout,
 		a.cfg.ShardFilter,
+		a.cfg.RoutingMode,
+		a.cfg.ReuseSendersAsReceivers,
+		a.cfg.MaxInflightPerWallet,
+		a.cfg.SuccessCooldown,
+		a.cfg.TransientCooldown,
+		a.cfg.QuarantineCooldown,
+		a.cfg.QuarantineTransientThreshold,
 	)
 
 	if a.opt.DryRun {
 		for i := 0; i < min(5, len(a.senders)); i++ {
-			log.Printf("[dry-run %d] sender=%s shard=%d receiver=%s value=%s", i+1, a.senders[i].Address, a.senders[i].Shard, a.receivers[i%len(a.receivers)], a.cfg.Value)
+			receiver, ok := a.pickReceiver(a.senders[i].Shard, i)
+			if !ok {
+				return fmt.Errorf("no receiver available for sender shard %d in %s mode", a.senders[i].Shard, a.cfg.RoutingMode)
+			}
+			log.Printf("[dry-run %d] sender=%s shard=%d receiver=%s receiverShard=%d value=%s", i+1, a.senders[i].Address, a.senders[i].Shard, receiver.Address, receiver.Shard, a.cfg.Value)
 		}
 		return nil
 	}
@@ -166,7 +220,6 @@ func (a *App) Run(ctx context.Context) error {
 	ctrl := ratelimit.NewTPSController(int64(a.cfg.SustainedTPS))
 	go ctrl.Run(runCtx, permits)
 
-	var issued uint64
 	var sent uint64
 	var transientSendErrors uint64
 	var rrSender uint64
@@ -206,15 +259,25 @@ func (a *App) Run(ctx context.Context) error {
 					return
 				}
 
-				n := int(atomic.AddUint64(&issued, 1))
-				if n > a.cfg.TargetTx {
+				if _, ok := a.reserveQuota(1); !ok {
 					return
 				}
 
-				si := int(atomic.AddUint64(&rrSender, 1)-1) % len(a.senders)
-				sender := a.senders[si]
-				ri := int(atomic.AddUint64(&rrRecv, 1)-1) % len(a.receivers)
-				receiver := a.receivers[ri]
+				sender, ok := a.acquireSender(int(atomic.AddUint64(&rrSender, 1) - 1))
+				if !ok {
+					a.releaseQuota(1)
+					if sleepErr := sleepWithContext(runCtx, 10*time.Millisecond); sleepErr != nil {
+						return
+					}
+					continue
+				}
+				receiver, ok := a.pickReceiver(sender.Shard, int(atomic.AddUint64(&rrRecv, 1)-1))
+				if !ok {
+					a.releaseQuota(1)
+					sender.release()
+					pushErr(fmt.Errorf("no receiver available for sender shard %d in %s mode", sender.Shard, a.cfg.RoutingMode))
+					return
+				}
 
 				var hash string
 				for {
@@ -222,17 +285,32 @@ func (a *App) Run(ctx context.Context) error {
 						return
 					}
 					var err error
-					hash, err = a.sendOne(runCtx, sender, receiver)
+					hash, err = a.sendOne(runCtx, sender, receiver.Address)
 					if err == nil {
+						sender.markSuccess(a.cfg.SuccessCooldown)
 						break
 					}
 					if a.cfg.ContinueOnTransientSendError && gateway.IsTransientSendError(err) {
+						quarantined := sender.markTransient(
+							a.cfg.TransientCooldown,
+							a.cfg.QuarantineCooldown,
+							a.cfg.QuarantineTransientThreshold,
+						)
+						a.releaseQuota(1)
 						cur := atomic.AddUint64(&transientSendErrors, 1)
 						if cur <= 20 || cur%100 == 0 {
 							log.Printf("[sprint transient-send-error] count=%d err=%v", cur, err)
 						}
+						if quarantined {
+							log.Printf("[sprint wallet-quarantine] sender=%s cooldown=%s", sender.Address, a.cfg.QuarantineCooldown)
+						}
+						if sleepErr := sleepWithContext(runCtx, 100*time.Millisecond); sleepErr != nil {
+							return
+						}
 						continue
 					}
+					a.releaseQuota(1)
+					sender.release()
 					pushErr(err)
 					return
 				}
@@ -257,9 +335,9 @@ func (a *App) Run(ctx context.Context) error {
 	}
 
 	if a.cfg.Duration == 0 && len(hashes) != a.cfg.TargetTx {
-		return fmt.Errorf("sent %d/%d txs", len(hashes), a.cfg.TargetTx)
+		return fmt.Errorf("sent %d/%d txs reserved=%d transientSendErrors=%d", len(hashes), a.cfg.TargetTx, a.reservedTarget.Load(), transientSendErrors)
 	}
-	log.Printf("[sprint] send phase done issued=%d sent=%d transientSendErrors=%d elapsed=%s", issued, len(hashes), transientSendErrors, time.Since(start))
+	log.Printf("[sprint] send phase done reserved=%d sent=%d transientSendErrors=%d elapsed=%s", a.reservedTarget.Load(), len(hashes), transientSendErrors, time.Since(start))
 	if !a.cfg.WaitConfirm {
 		return nil
 	}
@@ -275,7 +353,7 @@ func (a *App) Run(ctx context.Context) error {
 	return nil
 }
 
-func (a *App) sendOne(ctx context.Context, sender senderWallet, receiver string) (string, error) {
+func (a *App) sendOne(ctx context.Context, sender *senderWallet, receiver string) (string, error) {
 	nonce := sender.ReserveNonce()
 	tx := gateway.TxSendRequest{
 		Nonce:    nonce,
@@ -323,26 +401,8 @@ func (a *App) sendOne(ctx context.Context, sender senderWallet, receiver string)
 	if nErr != nil {
 		return "", fmt.Errorf("send tx nonce=%d failed with lowerNonceInTx and nonce refresh failed: %w", nonce, nErr)
 	}
-	sender.SetNonce(networkNonce)
-	retryNonce := sender.ReserveNonce()
-	tx.Nonce = retryNonce
-	unsigned.Nonce = int64(retryNonce)
-
-	toSign, err = txsign.SerializeForSigning(unsigned)
-	if err != nil {
-		return "", fmt.Errorf("serialize retried tx nonce=%d: %w", retryNonce, err)
-	}
-	sig, err = sender.Signer.SignTxBytes(toSign)
-	if err != nil {
-		return "", fmt.Errorf("sign retried tx nonce=%d: %w", retryNonce, err)
-	}
-	tx.Signature = hex.EncodeToString(sig)
-
-	hash, err = a.gw.SendTx(ctx, tx)
-	if err != nil {
-		return "", fmt.Errorf("send retried tx nonce=%d: %w", retryNonce, err)
-	}
-	return hash, nil
+	sender.SetNonceAtLeast(networkNonce)
+	return "", fmt.Errorf("send tx nonce=%d hit lowerNonceInTx; refreshed network nonce=%d: %w", nonce, networkNonce, err)
 }
 
 func (a *App) waitForFinalStatuses(ctx context.Context, hashes []string) (int, int, error) {
@@ -376,15 +436,42 @@ func (a *App) waitForFinalStatuses(ctx context.Context, hashes []string) (int, i
 		resolved := make([]string, 0, len(pending))
 		deltaSuccess := atomic.Int64{}
 		deltaFailed := atomic.Int64{}
+		checked := atomic.Int64{}
+		roundTotal := len(pending)
 
 		jobs := make(chan string)
 		var wg sync.WaitGroup
+		progressDone := make(chan struct{})
+		go func(total int) {
+			ticker := time.NewTicker(10 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-progressDone:
+					return
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					currentChecked := checked.Load()
+					currentResolved := deltaSuccess.Load() + deltaFailed.Load()
+					log.Printf(
+						"[sprint confirm progress] checked=%d/%d resolved=%d successDelta=%d failedDelta=%d",
+						currentChecked,
+						total,
+						currentResolved,
+						deltaSuccess.Load(),
+						deltaFailed.Load(),
+					)
+				}
+			}
+		}(roundTotal)
 		for i := 0; i < a.cfg.ConfirmWorkers; i++ {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
 				for h := range jobs {
 					status, err := a.gw.GetTxStatus(ctx, h)
+					checked.Add(1)
 					if err != nil {
 						continue
 					}
@@ -410,6 +497,7 @@ func (a *App) waitForFinalStatuses(ctx context.Context, hashes []string) (int, i
 		}
 		close(jobs)
 		wg.Wait()
+		close(progressDone)
 
 		for _, h := range resolved {
 			delete(pending, h)
@@ -456,4 +544,170 @@ func max(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func findWalletShard(mf *manifest.Manifest, address string) (int, bool) {
+	for _, record := range mf.Wallets {
+		if strings.EqualFold(record.Address, address) {
+			return record.Shard, true
+		}
+	}
+	return 0, false
+}
+
+func validateShardCoverage(senders []senderWallet, receivers []receiverTarget, routingMode string) error {
+	receiverShards := make(map[int]struct{}, len(receivers))
+	for _, receiver := range receivers {
+		receiverShards[receiver.Shard] = struct{}{}
+	}
+	senderShards := make(map[int]struct{}, len(senders))
+	for _, sender := range senders {
+		senderShards[sender.Shard] = struct{}{}
+	}
+	for shard := range senderShards {
+		switch routingMode {
+		case "same-shard":
+			if _, ok := receiverShards[shard]; !ok {
+				return fmt.Errorf("no same-shard receiver available for sender shard %d", shard)
+			}
+		case "cross-shard":
+			found := false
+			for receiverShard := range receiverShards {
+				if receiverShard != shard {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return fmt.Errorf("no cross-shard receiver available for sender shard %d", shard)
+			}
+		default:
+			return fmt.Errorf("unsupported routing mode %q", routingMode)
+		}
+	}
+	return nil
+}
+
+func (a *App) pickReceiver(senderShard int, start int) (receiverTarget, bool) {
+	for i := 0; i < len(a.receivers); i++ {
+		idx := (start + i) % len(a.receivers)
+		receiver := a.receivers[idx]
+		if a.isValidReceiverShard(senderShard, receiver.Shard) {
+			return receiver, true
+		}
+	}
+	return receiverTarget{}, false
+}
+
+func (a *App) isValidReceiverShard(senderShard int, receiverShard int) bool {
+	switch a.cfg.RoutingMode {
+	case "same-shard":
+		return receiverShard == senderShard
+	case "cross-shard":
+		return receiverShard != senderShard
+	default:
+		return false
+	}
+}
+
+func sleepWithContext(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
+}
+
+func (a *App) reserveQuota(limit int) (int, bool) {
+	if limit <= 0 {
+		return 0, false
+	}
+	if a.cfg.TargetTx <= 0 {
+		return limit, true
+	}
+	for {
+		current := a.reservedTarget.Load()
+		if current >= uint64(a.cfg.TargetTx) {
+			return 0, false
+		}
+		remaining := a.cfg.TargetTx - int(current)
+		n := min(limit, remaining)
+		if n <= 0 {
+			return 0, false
+		}
+		if a.reservedTarget.CompareAndSwap(current, current+uint64(n)) {
+			return n, true
+		}
+	}
+}
+
+func (a *App) releaseQuota(n int) {
+	if n <= 0 || a.cfg.TargetTx <= 0 {
+		return
+	}
+	a.reservedTarget.Add(^uint64(n - 1))
+}
+
+func (a *App) acquireSender(start int) (*senderWallet, bool) {
+	now := time.Now()
+	for i := 0; i < len(a.senders); i++ {
+		idx := (start + i) % len(a.senders)
+		if a.senders[idx].tryAcquire(now, a.cfg.MaxInflightPerWallet) {
+			return &a.senders[idx], true
+		}
+	}
+	return nil, false
+}
+
+func (w *senderWallet) tryAcquire(now time.Time, maxInflight int) bool {
+	w.stateMu.Lock()
+	defer w.stateMu.Unlock()
+	if w.inflight >= maxInflight {
+		return false
+	}
+	if now.Before(w.nextEligibleAt) {
+		return false
+	}
+	w.inflight++
+	return true
+}
+
+func (w *senderWallet) markSuccess(cooldown time.Duration) {
+	w.stateMu.Lock()
+	defer w.stateMu.Unlock()
+	if w.inflight > 0 {
+		w.inflight--
+	}
+	w.transientErrors = 0
+	w.nextEligibleAt = time.Now().Add(cooldown)
+}
+
+func (w *senderWallet) markTransient(cooldown time.Duration, quarantine time.Duration, threshold int) bool {
+	w.stateMu.Lock()
+	defer w.stateMu.Unlock()
+	if w.inflight > 0 {
+		w.inflight--
+	}
+	w.transientErrors++
+	nextCooldown := cooldown
+	quarantined := false
+	if w.transientErrors >= threshold {
+		nextCooldown = quarantine
+		w.transientErrors = 0
+		quarantined = true
+	}
+	w.nextEligibleAt = time.Now().Add(nextCooldown)
+	return quarantined
+}
+
+func (w *senderWallet) release() {
+	w.stateMu.Lock()
+	defer w.stateMu.Unlock()
+	if w.inflight > 0 {
+		w.inflight--
+	}
 }
