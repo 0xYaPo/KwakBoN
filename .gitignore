@@ -12,6 +12,7 @@ secrets/
 # Generated data and local run output
 logs/
 tmp/
+.tmp/
 tmp-*/
 artifacts/
 funding-results/
@@ -22,6 +23,7 @@ bin/
 out/
 *.log
 *.pid
+state/
 
 # Language / tool caches
 .DS_Store
@@ -37,3 +39,16 @@ node_modules/
 *.out
 vendor/
 seed.txt
+
+# Local challenge manifests and generated pools
+configs/challenge4/pools/
+configs/challenge4/wallet-allocation.challenge4-callers.json
+configs/challenge4/wallets-manifest.challenge4-callers.json
+configs/challenge4/wallets-manifest.challenge4-operators.json
+configs/wallets-manifest.challenge3-part1.json
+configs/wallets-manifest.challenge3-part1.live.json
+configs/wallets-manifest.challenge3-part2.json
+configs/wallets-manifest.challenge3-part2.live.json
+
+# Local contract workspace and build output
+contracts/
