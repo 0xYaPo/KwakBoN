@@ -1,6 +1,6 @@
 # KwakBoN
 
-Clean workspace for the Guild Wars competition on MultiversX.
+A workspace for the Guild Wars competition on MultiversX.
 
 Current challenge brief:
 - [docs/challenge3.md](docs/challenge3.md)
